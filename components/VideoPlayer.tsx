@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { AlertCircle, Play, RefreshCw, Radio, Music, Square, Star, Captions, StopCircle, Volume2, VolumeX, Maximize, AlarmClock, Check, Clock } from 'lucide-react';
 import { AppTheme, Channel, Country } from '../types';
@@ -14,6 +14,7 @@ interface VideoPlayerProps {
   isFavorite: boolean;
   onToggleFavorite: () => void;
   onAddReminder: (channel: Channel, time: string) => void;
+  settings?: { enableSound: boolean };
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
@@ -24,13 +25,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     theme,
     isFavorite,
     onToggleFavorite,
-    onAddReminder
+    onAddReminder,
+    settings = { enableSound: true }
 }) => {
-  const url = channel?.url;
   const { styles } = theme;
   
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
+  // Dual Video Engine State
+  // 0 and 1 represent the two video elements. We toggle between them.
+  const [activePlayerIndex, setActivePlayerIndex] = useState(0);
+  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
+  const hlsRefs = useRef<(Hls | null)[]>([null, null]);
+
+  // General State
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -45,7 +51,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  // New Features State
+  // Features State
   const [signalStrength, setSignalStrength] = useState<number>(0); 
   const [showTranslate, setShowTranslate] = useState(false);
   const [currentTimeStr, setCurrentTimeStr] = useState('');
@@ -53,6 +59,35 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Alarm State
   const [showAlarmPicker, setShowAlarmPicker] = useState(false);
   const [alarmTime, setAlarmTime] = useState('');
+
+  // Helper: Play Tick Sound
+  const playTick = useCallback(() => {
+      if (!settings.enableSound) return;
+      try {
+          const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContext) return;
+          
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          
+          // Short high-pitched "tick" to indicate signal lock
+          osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+          osc.type = 'sine';
+          
+          // Quick envelope
+          gain.gain.setValueAtTime(0.05, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+          
+          osc.start();
+          osc.stop(ctx.currentTime + 0.06);
+      } catch (e) {
+          // Ignore audio errors
+      }
+  }, [settings.enableSound]);
 
   // Update Clock based on country
   useEffect(() => {
@@ -80,134 +115,177 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => clearInterval(interval);
   }, [country, channel]);
 
-  // Handle Volume Change
+  // Volume Sync: Apply volume to ALL players to ensure smooth transition
   useEffect(() => {
-      if (videoRef.current) {
-          videoRef.current.volume = volume;
-          videoRef.current.muted = isMuted;
-      }
+      videoRefs.forEach(ref => {
+          if (ref.current) {
+              ref.current.volume = volume;
+              ref.current.muted = isMuted;
+          }
+      });
   }, [volume, isMuted]);
 
+  // --- DUAL ENGINE LOADING LOGIC ---
   useEffect(() => {
-    let hls: Hls | null = null;
-    const video = videoRef.current;
-
-    if (!video || !url) {
+    const url = channel?.url;
+    
+    // If no channel, just reset everything
+    if (!url) {
         setLoading(false); 
         setSignalStrength(0);
         setIsPlaying(false);
         return;
     }
 
+    // Determine which player is currently active and which is the background "next" player
+    const nextIndex = (activePlayerIndex + 1) % 2;
+    const nextVideo = videoRefs[nextIndex].current;
+    const currentVideo = videoRefs[activePlayerIndex].current;
+
+    if (!nextVideo) return;
+
+    // If we are recording, stop it before switching channel context
     if (isRecording) handleStopRecording();
+
+    // Start loading process on the NEXT player
+    // We do NOT stop the current player yet. It keeps playing in the background.
+    
+    // Reset states for the new load
     setSignalStrength(1); 
     setShowTranslate(false);
     setError(null);
-    setLoading(true);
-    setIsPlaying(false);
+    // Only show global loading spinner if the current player is NOT playing (initial load)
+    // otherwise we rely on the old video to mask the loading time
+    if (!currentVideo || currentVideo.paused || currentVideo.ended) {
+        setLoading(true);
+    }
+    
     setShowAlarmPicker(false);
 
-    const handleMediaError = () => {
-        if (video.networkState === 3) { 
-             setError(isRadio ? "电台无法连接" : "直播流无法播放");
-             setLoading(false);
-             setSignalStrength(0);
-        }
-    };
-
-    const handleWaiting = () => {
-        setLoading(true);
-        setSignalStrength(2); 
-    };
-
-    const handlePlaying = () => {
-        setLoading(false);
-        setIsPlaying(true);
-        setError(null);
-        setSignalStrength(4); 
-    };
-
-    const handleCanPlay = () => {
-        if (autoPlay) {
-            video.play().catch((e) => console.log("Autoplay prevented", e));
-        }
-    };
-
-    if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+    // Cleanup previous HLS on the target player
+    if (hlsRefs.current[nextIndex]) {
+        hlsRefs.current[nextIndex]?.destroy();
+        hlsRefs.current[nextIndex] = null;
     }
 
     const isHlsSource = url.includes('.m3u8');
+    let hls: Hls | null = null;
 
+    // --- Event Handlers for the NEXT player ---
+
+    const onReadyToSwitch = () => {
+        // Signal is stable (canplay / manifest parsed)
+        playTick(); // Sound effect
+        setActivePlayerIndex(nextIndex); // SWITCH VISIBILITY
+        setIsPlaying(true);
+        setLoading(false);
+        setSignalStrength(4);
+
+        // Attempt autoplay
+        if (autoPlay) {
+            nextVideo.play().catch(e => console.log("Autoplay prevented", e));
+        }
+
+        // Cleanup the OLD player after a short delay to allow CSS fade
+        setTimeout(() => {
+            if (currentVideo) {
+                currentVideo.pause();
+                currentVideo.removeAttribute('src');
+                currentVideo.load(); 
+            }
+            if (hlsRefs.current[activePlayerIndex]) {
+                hlsRefs.current[activePlayerIndex]?.destroy();
+                hlsRefs.current[activePlayerIndex] = null;
+            }
+        }, 500); 
+    };
+
+    const onError = (e: any) => {
+        // If the new channel fails, we should show error and maybe stop the old one
+        console.error("Stream Error", e);
+        // Only update UI error if we are committed to this player or force switch
+        if (activePlayerIndex !== nextIndex) {
+             // Force switch to show error
+             setActivePlayerIndex(nextIndex);
+        }
+        setError(isRadio ? "电台无法连接" : "直播流无法播放");
+        setLoading(false);
+        setSignalStrength(0);
+    };
+
+    // Setup Listeners
+    const cleanupListeners = () => {
+        nextVideo.removeEventListener('error', onError);
+        nextVideo.removeEventListener('canplay', onReadyToSwitch);
+    };
+
+    nextVideo.addEventListener('error', onError);
+    // We use 'canplay' as the signal stable indicator for native video
+    nextVideo.addEventListener('canplay', onReadyToSwitch);
+
+    // Initialize Source
     if (isHlsSource && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         backBufferLength: 90,
       });
-      hlsRef.current = hls;
+      hlsRefs.current[nextIndex] = hls;
 
       hls.loadSource(url);
-      hls.attachMedia(video);
+      hls.attachMedia(nextVideo);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (autoPlay) {
-            video.play().catch(() => {});
-        }
+         // HLS often ready before 'canplay', but we wait for canplay for video frames
+         // Or we can trigger here if we prefer faster switching
+         if (autoPlay) nextVideo.play().catch(() => {});
       });
 
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              setSignalStrength(1);
               hls?.startLoad();
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
-              setSignalStrength(2);
               hls?.recoverMediaError();
               break;
             default:
+              onError(data);
               hls?.destroy();
-              setError("播放源致命错误");
               break;
           }
         }
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = url;
     } else {
-      video.src = url;
+      // Native HLS or MP4/MP3
+      nextVideo.src = url;
+      nextVideo.load();
     }
 
-    video.addEventListener('error', handleMediaError);
-    video.addEventListener('waiting', handleWaiting);
-    video.addEventListener('playing', handlePlaying);
-    video.addEventListener('canplay', handleCanPlay);
-
+    // Cleanup function when effect unmounts (e.g. component destroyed, though this effect runs on url change)
     return () => {
-      if (hls) hls.destroy();
-      video.removeEventListener('error', handleMediaError);
-      video.removeEventListener('waiting', handleWaiting);
-      video.removeEventListener('playing', handlePlaying);
-      video.removeEventListener('canplay', handleCanPlay);
+        cleanupListeners();
     };
-  }, [url, isRadio, autoPlay]);
 
+  }, [channel?.url, channel?.id]); // Re-run when channel changes
+
+  // Play/Pause toggle for ACTIVE player
   const togglePlay = () => {
-    if (!videoRef.current) return;
+    const video = videoRefs[activePlayerIndex].current;
+    if (!video) return;
     if (isPlaying) {
-      videoRef.current.pause();
+      video.pause();
       setIsPlaying(false);
     } else {
-      videoRef.current.play();
+      video.play();
       setIsPlaying(true);
     }
   };
 
+  // Recording uses the ACTIVE player
   const handleStartRecording = () => {
-    const video = videoRef.current;
+    const video = videoRefs[activePlayerIndex].current;
     if (!video) return;
 
     try {
@@ -239,7 +317,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             
             setIsRecording(false);
 
-            // Attempt to use File System Access API to prompt user for save location
+            // Save Logic
             // @ts-ignore
             if (window.showSaveFilePicker) {
                 try {
@@ -255,16 +333,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     const writable = await handle.createWritable();
                     await writable.write(blob);
                     await writable.close();
-                    return; // Successfully saved via picker
+                    return;
                 } catch (err) {
-                    if ((err as Error).name === 'AbortError') {
-                        return; // User cancelled the picker, do nothing
-                    }
-                    console.error("Save file picker failed, falling back to auto download", err);
+                    if ((err as Error).name === 'AbortError') return;
+                    console.warn("Save picker failed, fallback to download");
                 }
             }
 
-            // Fallback to automatic download (old method)
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             document.body.appendChild(a);
@@ -315,26 +390,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         
         {/* Web 95 Title Bar */}
         {theme.type === 'web95' && (
-             <div className="absolute top-0 left-0 right-0 h-8 bg-[#000080] flex items-center justify-between px-2 z-20">
+             <div className="absolute top-0 left-0 right-0 h-8 bg-[#000080] flex items-center justify-between px-2 z-20 select-none">
                  <span className="text-white font-bold text-xs">Media Player - {channel.name}</span>
                  <div className="flex gap-1">
-                     <button className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">_</button>
-                     <button className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">□</button>
-                     <button className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">×</button>
+                     <div className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">_</div>
+                     <div className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">□</div>
+                     <div className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">×</div>
                  </div>
              </div>
         )}
 
-        <video
-          ref={videoRef}
-          className={`w-full h-full object-contain ${isRadio ? 'opacity-0' : 'opacity-100'}`}
-          playsInline
-          crossOrigin="anonymous" 
-          style={theme.type === 'web95' ? { paddingTop: '32px' } : {}}
-        />
+        {/* DUAL VIDEO PLAYERS */}
+        {[0, 1].map((index) => (
+            <video
+                key={index}
+                ref={videoRefs[index]}
+                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ${isRadio ? 'opacity-0' : ''}`}
+                style={{ 
+                    opacity: activePlayerIndex === index && !isRadio ? 1 : 0,
+                    paddingTop: theme.type === 'web95' ? '32px' : '0',
+                    zIndex: activePlayerIndex === index ? 1 : 0
+                }}
+                playsInline
+                crossOrigin="anonymous" 
+            />
+        ))}
 
         {isRadio && (
-            <div className={`absolute inset-0 flex items-center justify-center pointer-events-none ${styles.bgSidebar}`}>
+            <div className={`absolute inset-0 flex items-center justify-center pointer-events-none ${styles.bgSidebar} z-10`}>
                 <div className="relative">
                     {isPlaying && (
                         <div className={`absolute inset-0 ${styles.buttonPrimary} blur-3xl opacity-20 animate-pulse rounded-full`}></div>
@@ -350,17 +433,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
         )}
 
-        {loading && !error && (
-             <div className={`absolute inset-0 z-20 flex flex-col items-center justify-center ${styles.bgMain}`}>
+        {loading && (
+             <div className={`absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm`}>
                 <div className="flex items-center gap-2">
                     <RefreshCw className={`w-8 h-8 ${styles.textMain} animate-spin`} />
-                    <span className={styles.textMain}>Loading Stream...</span>
+                    <span className={styles.textMain}>Connecting...</span>
                 </div>
              </div>
         )}
 
         {showTranslate && (
-            <div className="absolute bottom-20 left-0 right-0 px-8 text-center z-10 pointer-events-none">
+            <div className="absolute bottom-20 left-0 right-0 px-8 text-center z-20 pointer-events-none">
                 <div className={`bg-black/70 text-white px-4 py-2 rounded-lg inline-block backdrop-blur-sm`}>
                     <p className="text-lg font-medium leading-relaxed">
                         [实时翻译功能已开启] <br/>
@@ -378,8 +461,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onClick={() => {
                   setLoading(true);
                   setError(null);
-                  if(hlsRef.current) hlsRef.current.startLoad();
-                  else if(videoRef.current) videoRef.current.load();
+                  // Try to reload current engine
+                  const currentHls = hlsRefs.current[activePlayerIndex];
+                  const currentVid = videoRefs[activePlayerIndex].current;
+                  if(currentHls) currentHls.startLoad();
+                  else if(currentVid) currentVid.load();
               }}
               className={`mt-4 px-4 py-2 ${styles.layoutShape} ${styles.buttonPrimary} flex items-center gap-2`}
             >
@@ -390,7 +476,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {/* Video Controls Overlay */}
         <div className={`
-             absolute inset-0 z-10 flex flex-col justify-between p-4 transition-opacity duration-300
+             absolute inset-0 z-20 flex flex-col justify-between p-4 transition-opacity duration-300
              ${theme.type === 'web95' ? 'opacity-100 pointer-events-none' : 'opacity-0 group-hover:opacity-100 bg-gradient-to-t from-black/80 via-transparent to-black/40'}
         `}>
              {/* Top Bar */}
@@ -503,7 +589,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <button 
                         onClick={() => {
                            if (document.fullscreenElement) document.exitFullscreen();
-                           else videoRef.current?.parentElement?.requestFullscreen();
+                           else videoRefs[activePlayerIndex].current?.parentElement?.requestFullscreen();
                         }}
                         className={`p-2 ${styles.layoutShape} ${styles.button}`}
                     >

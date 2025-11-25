@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Channel, AppTheme } from '../types';
-import { Tv, Search, ImageOff, Radio, Star, Play } from 'lucide-react';
+import { Tv, Search, ImageOff, Radio, Star, Play, Tag } from 'lucide-react';
 
 interface ChannelGridProps {
   channels: Channel[];
@@ -25,20 +25,48 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
     onToggleFavorite
 }) => {
   const [filter, setFilter] = useState('');
+  const { styles } = theme;
 
+  // 1. Filter
   const filteredChannels = useMemo(() => {
     if (!filter) return channels;
     return channels.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()));
   }, [channels, filter]);
 
+  // 2. Group logic (Group by category/genre)
+  // Only group if NO search filter is active to keep search results clean
+  const groupedChannels = useMemo(() => {
+      if (filter) return null; 
+
+      const groups: Record<string, Channel[]> = {};
+      filteredChannels.forEach(c => {
+          // Extract first group if multiple
+          let groupName = c.group ? c.group.split(';')[0].trim() : '其他 (Other)';
+          if (!groupName) groupName = '其他 (Other)';
+          
+          if (!groups[groupName]) {
+              groups[groupName] = [];
+          }
+          groups[groupName].push(c);
+      });
+
+      return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filteredChannels, filter]);
+
   const isFavorite = (channel: Channel) => favorites.some(fav => fav.id === channel.id);
-  const { styles } = theme;
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-        {Array.from({ length: 12 }).map((_, i) => (
-          <div key={i} className={`bg-white/5 ${styles.layoutShape} h-20 animate-pulse`}></div>
+      <div className="space-y-8">
+        {Array.from({ length: 3 }).map((_, idx) => (
+            <div key={idx} className="space-y-3">
+                <div className={`h-6 w-32 bg-white/5 ${styles.layoutShape} animate-pulse`}></div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className={`bg-white/5 ${styles.layoutShape} h-24 animate-pulse`}></div>
+                    ))}
+                </div>
+            </div>
         ))}
       </div>
     );
@@ -58,9 +86,9 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
   }
 
   return (
-    <div className="space-y-4">
-      {/* Search Filter */}
-      <div className={`flex items-center gap-2 p-3 ${styles.layoutShape} ${styles.border} ${styles.input} w-full`}>
+    <div className="space-y-6">
+      {/* Search Bar */}
+      <div className={`sticky top-0 z-30 flex items-center gap-2 p-3 ${styles.layoutShape} ${styles.border} ${styles.bgMain} shadow-xl backdrop-blur-md bg-opacity-90`}>
         <Search className={`w-4 h-4 ${styles.textDim}`} />
         <input 
             type="text"
@@ -71,71 +99,150 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
         />
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3">
-        {filteredChannels.map(channel => {
-            const isActive = currentChannel?.url === channel.url;
-            const fav = isFavorite(channel);
-            
-            return (
-                <div
-                    key={channel.id || channel.url} 
-                    className={`
-                    group relative flex flex-col transition-all duration-200 overflow-hidden
-                    ${styles.layoutShape}
-                    ${isActive
-                        ? `${styles.buttonActive} ring-2 ring-offset-2 ring-offset-black/50 ring-current transform -translate-y-1 z-10` 
-                        : `${styles.card} hover:bg-white/10 hover:-translate-y-0.5`}
-                    `}
-                >
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onToggleFavorite(channel);
-                        }}
-                        className={`absolute top-1 right-1 z-20 p-1.5 rounded-full transition-colors ${fav ? 'text-yellow-400' : 'text-transparent group-hover:text-white/30 hover:!text-yellow-400'}`}
-                    >
-                        <Star className={`w-3.5 h-3.5 ${fav ? 'fill-yellow-400' : 'fill-current'}`} />
-                    </button>
+      {/* Content Area */}
+      <div className="min-h-[300px]">
+          
+          {/* MODE A: Grouped View (Default) */}
+          {groupedChannels ? (
+              <div className="space-y-10">
+                  {groupedChannels.map(([groupName, groupItems]) => (
+                      <div key={groupName} className="space-y-3">
+                          {/* Group Header */}
+                          <div className={`flex items-center gap-2 pb-2 border-b ${styles.border} opacity-90`}>
+                              <Tag className={`w-4 h-4 ${styles.textDim}`} />
+                              <h4 className={`text-base font-bold ${styles.textMain} uppercase tracking-wider`}>
+                                  {groupName}
+                              </h4>
+                              <span className={`text-xs ${styles.textDim} font-normal bg-white/10 px-2 py-0.5 rounded-full`}>
+                                  {groupItems.length}
+                              </span>
+                          </div>
 
-                    <button
-                        onClick={() => onSelectChannel(channel)}
-                        className="w-full flex flex-col items-center p-3 h-full text-center"
-                    >
-                        <div className={`w-10 h-10 mb-2 ${styles.layoutShape} bg-black/20 p-1.5 flex items-center justify-center overflow-hidden shadow-inner`}>
-                            {channel.logo ? (
-                                <img 
-                                    src={channel.logo} 
-                                    alt={channel.name} 
-                                    className="w-full h-full object-contain"
-                                    onError={(e) => {
-                                        (e.target as HTMLImageElement).style.display = 'none';
-                                        (e.target as HTMLImageElement).parentElement!.classList.add('fallback-icon');
-                                    }}
-                                />
-                            ) : (
-                                mode === 'tv' ? <Tv className={`w-5 h-5 ${styles.textDim}`} /> : <Radio className={`w-5 h-5 ${styles.textDim}`} />
-                            )}
-                            <div className="hidden fallback-icon">
-                                <ImageOff className={`w-4 h-4 ${styles.textDim}`} />
-                            </div>
-                        </div>
-                        
-                        <span className={`text-xs font-medium leading-tight line-clamp-2 w-full ${isActive ? 'text-white' : styles.textMain}`}>
-                            {channel.name}
-                        </span>
-                        
-                        <div className={`mt-auto pt-2 text-[10px] ${styles.textDim} opacity-60 truncate w-full`}>
-                            {channel.group || 'Live'}
-                        </div>
-                    </button>
-                    
-                    {isActive && (
-                         <div className="absolute inset-x-0 bottom-0 h-0.5 bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.8)]"></div>
-                    )}
-                </div>
-            );
-        })}
+                          {/* Grid */}
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3">
+                              {groupItems.map(channel => (
+                                  <ChannelCard 
+                                      key={channel.id} 
+                                      channel={channel} 
+                                      currentChannel={currentChannel} 
+                                      onSelectChannel={onSelectChannel} 
+                                      isFavorite={isFavorite(channel)} 
+                                      onToggleFavorite={onToggleFavorite} 
+                                      mode={mode} 
+                                      styles={styles}
+                                  />
+                              ))}
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          ) : (
+              /* MODE B: Flat Search Results */
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3">
+                {filteredChannels.length > 0 ? (
+                    filteredChannels.map(channel => (
+                        <ChannelCard 
+                            key={channel.id} 
+                            channel={channel} 
+                            currentChannel={currentChannel} 
+                            onSelectChannel={onSelectChannel} 
+                            isFavorite={isFavorite(channel)} 
+                            onToggleFavorite={onToggleFavorite} 
+                            mode={mode} 
+                            styles={styles}
+                        />
+                    ))
+                ) : (
+                    <div className={`col-span-full py-12 text-center ${styles.textDim}`}>
+                        <Search className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                        <p>没有找到匹配 "{filter}" 的频道</p>
+                    </div>
+                )}
+              </div>
+          )}
       </div>
     </div>
   );
+};
+
+const ChannelCard: React.FC<{
+    channel: Channel;
+    currentChannel: Channel | null;
+    onSelectChannel: (c: Channel) => void;
+    isFavorite: boolean;
+    onToggleFavorite: (c: Channel) => void;
+    mode: 'tv' | 'radio';
+    styles: any;
+}> = ({ channel, currentChannel, onSelectChannel, isFavorite, onToggleFavorite, mode, styles }) => {
+    const isActive = currentChannel?.url === channel.url;
+    
+    return (
+        <div
+            className={`
+            group relative flex flex-col transition-all duration-200 overflow-hidden h-full
+            ${styles.layoutShape}
+            ${isActive
+                ? `${styles.buttonActive} ring-2 ring-offset-2 ring-offset-black/50 ring-current transform -translate-y-1 z-10 shadow-lg` 
+                : `${styles.card} hover:bg-white/10 hover:-translate-y-1 hover:shadow-md`}
+            `}
+        >
+            <button
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(channel);
+                }}
+                className={`absolute top-1 right-1 z-20 p-1.5 rounded-full transition-all duration-200 
+                    ${isFavorite 
+                        ? 'text-yellow-400 bg-black/20' 
+                        : 'text-white/20 hover:text-yellow-400 hover:bg-black/40'
+                    }`}
+                title="收藏频道"
+            >
+                <Star className={`w-3.5 h-3.5 ${isFavorite ? 'fill-yellow-400' : 'fill-none'}`} />
+            </button>
+
+            <button
+                onClick={() => onSelectChannel(channel)}
+                className="w-full flex flex-col items-center p-3 h-full text-center"
+            >
+                <div className={`
+                    w-10 h-10 mb-3 ${styles.layoutShape} bg-black/20 p-1.5 
+                    flex items-center justify-center overflow-hidden shadow-inner
+                    transition-transform duration-300 group-hover:scale-110
+                `}>
+                    {channel.logo ? (
+                        <img 
+                            src={channel.logo} 
+                            alt={channel.name} 
+                            className="w-full h-full object-contain drop-shadow-sm"
+                            loading="lazy"
+                            onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                                (e.target as HTMLImageElement).parentElement!.classList.add('fallback-icon');
+                            }}
+                        />
+                    ) : (
+                        mode === 'tv' ? <Tv className={`w-5 h-5 ${styles.textDim}`} /> : <Radio className={`w-5 h-5 ${styles.textDim}`} />
+                    )}
+                    <div className="hidden fallback-icon">
+                        {mode === 'tv' ? <Tv className={`w-5 h-5 ${styles.textDim}`} /> : <Radio className={`w-5 h-5 ${styles.textDim}`} /> }
+                    </div>
+                </div>
+                
+                <span className={`text-xs font-medium leading-tight line-clamp-2 w-full ${isActive ? 'text-white font-bold' : styles.textMain}`}>
+                    {channel.name}
+                </span>
+                
+                {isActive && (
+                    <div className="mt-auto pt-2 flex items-center gap-1 text-[10px] text-green-400 font-mono animate-pulse">
+                        <Play className="w-2 h-2 fill-current" /> Playing
+                    </div>
+                )}
+            </button>
+            
+            {isActive && (
+                 <div className="absolute inset-x-0 bottom-0 h-0.5 bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]"></div>
+            )}
+        </div>
+    );
 };
