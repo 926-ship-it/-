@@ -36,6 +36,7 @@ export interface ThemeStyles {
   accentColor: string; // Hex for inline styles
   layoutShape: string;
   shadow: string;
+  bgPattern?: string; // NEW: Decorative background class
 }
 
 export interface AppTheme {

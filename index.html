@@ -57,15 +57,35 @@
         border-color: #fff #808080 #808080 #fff;
       }
 
-      @keyframes pulse-record {
-        0% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.5; transform: scale(1.1); }
-        100% { opacity: 1; transform: scale(1); }
-      }
-      .animate-record {
-        animation: pulse-record 1.5s infinite ease-in-out;
+      /* --- VISUAL UPGRADES --- */
+
+      /* 1. Noise Texture (adds film grain / premium feel) */
+      .bg-noise {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        pointer-events: none;
+        z-index: 50;
+        opacity: 0.03;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
       }
 
+      /* 2. Grid Pattern (for Cyber theme) */
+      .bg-grid-pattern {
+        background-size: 40px 40px;
+        background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                          linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      }
+
+      /* 3. Dot Pattern (for Acid/Cartoon theme) */
+      .bg-dot-pattern {
+        background-image: radial-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+
+      /* Animation: Ambilight Pulse */
       @keyframes pulse-glow {
         0% { opacity: 0.15; transform: scale(1); }
         50% { opacity: 0.3; transform: scale(1.05); }
@@ -73,6 +93,15 @@
       }
       .animate-pulse-glow {
         animation: pulse-glow 4s infinite ease-in-out;
+      }
+
+      /* Animation: Moving Grid (Perspective) */
+      @keyframes grid-move {
+        0% { background-position: 0 0; }
+        100% { background-position: 40px 40px; }
+      }
+      .animate-grid-move {
+        animation: grid-move 5s linear infinite;
       }
     </style>
   <script type="importmap">
