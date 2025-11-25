@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { Channel, AppTheme } from '../types';
 import { Tv, Search, ImageOff, Radio, Star, Play, Tag } from 'lucide-react';
@@ -27,20 +26,19 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
   const [filter, setFilter] = useState('');
   const { styles } = theme;
 
-  // 1. Filter
+  // 1. 过滤 (搜索)
   const filteredChannels = useMemo(() => {
     if (!filter) return channels;
     return channels.filter(c => c.name.toLowerCase().includes(filter.toLowerCase()));
   }, [channels, filter]);
 
-  // 2. Group logic (Group by category/genre)
-  // Only group if NO search filter is active to keep search results clean
+  // 2. 分组 (只在没有搜索词时分组，搜索时平铺显示结果)
   const groupedChannels = useMemo(() => {
-      if (filter) return null; 
+      if (filter) return null; // 搜索时不分组
 
       const groups: Record<string, Channel[]> = {};
       filteredChannels.forEach(c => {
-          // Extract first group if multiple
+          // 清理组名，例如 "Movies;Action" -> "Movies" (取第一个)
           let groupName = c.group ? c.group.split(';')[0].trim() : '其他 (Other)';
           if (!groupName) groupName = '其他 (Other)';
           
@@ -50,6 +48,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
           groups[groupName].push(c);
       });
 
+      // 按组名排序
       return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filteredChannels, filter]);
 
@@ -58,8 +57,8 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
   if (loading) {
     return (
       <div className="space-y-8">
-        {Array.from({ length: 3 }).map((_, idx) => (
-            <div key={idx} className="space-y-3">
+        {Array.from({ length: 3 }).map((_, sectionIdx) => (
+            <div key={sectionIdx} className="space-y-3">
                 <div className={`h-6 w-32 bg-white/5 ${styles.layoutShape} animate-pulse`}></div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                     {Array.from({ length: 6 }).map((_, i) => (
@@ -87,7 +86,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Search Bar */}
+      {/* 搜索栏 */}
       <div className={`sticky top-0 z-30 flex items-center gap-2 p-3 ${styles.layoutShape} ${styles.border} ${styles.bgMain} shadow-xl backdrop-blur-md bg-opacity-90`}>
         <Search className={`w-4 h-4 ${styles.textDim}`} />
         <input 
@@ -99,15 +98,15 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
         />
       </div>
 
-      {/* Content Area */}
+      {/* 内容显示区域 */}
       <div className="min-h-[300px]">
           
-          {/* MODE A: Grouped View (Default) */}
+          {/* 模式 A: 分组视图 (默认) */}
           {groupedChannels ? (
               <div className="space-y-10">
                   {groupedChannels.map(([groupName, groupItems]) => (
                       <div key={groupName} className="space-y-3">
-                          {/* Group Header */}
+                          {/* 分组标题 */}
                           <div className={`flex items-center gap-2 pb-2 border-b ${styles.border} opacity-90`}>
                               <Tag className={`w-4 h-4 ${styles.textDim}`} />
                               <h4 className={`text-base font-bold ${styles.textMain} uppercase tracking-wider`}>
@@ -118,7 +117,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
                               </span>
                           </div>
 
-                          {/* Grid */}
+                          {/* 分组网格 */}
                           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3">
                               {groupItems.map(channel => (
                                   <ChannelCard 
@@ -137,7 +136,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
                   ))}
               </div>
           ) : (
-              /* MODE B: Flat Search Results */
+              /* 模式 B: 搜索结果平铺视图 */
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3">
                 {filteredChannels.length > 0 ? (
                     filteredChannels.map(channel => (
@@ -165,6 +164,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
   );
 };
 
+// 提取的卡片组件，保持代码整洁
 const ChannelCard: React.FC<{
     channel: Channel;
     currentChannel: Channel | null;
@@ -186,6 +186,7 @@ const ChannelCard: React.FC<{
                 : `${styles.card} hover:bg-white/10 hover:-translate-y-1 hover:shadow-md`}
             `}
         >
+            {/* 收藏按钮 */}
             <button
                 onClick={(e) => {
                     e.stopPropagation();
@@ -201,10 +202,12 @@ const ChannelCard: React.FC<{
                 <Star className={`w-3.5 h-3.5 ${isFavorite ? 'fill-yellow-400' : 'fill-none'}`} />
             </button>
 
+            {/* 主点击区域 */}
             <button
                 onClick={() => onSelectChannel(channel)}
                 className="w-full flex flex-col items-center p-3 h-full text-center"
             >
+                {/* Logo 容器 */}
                 <div className={`
                     w-10 h-10 mb-3 ${styles.layoutShape} bg-black/20 p-1.5 
                     flex items-center justify-center overflow-hidden shadow-inner
@@ -224,15 +227,18 @@ const ChannelCard: React.FC<{
                     ) : (
                         mode === 'tv' ? <Tv className={`w-5 h-5 ${styles.textDim}`} /> : <Radio className={`w-5 h-5 ${styles.textDim}`} />
                     )}
+                    {/* 这里用于处理图片加载失败后的回退显示 */}
                     <div className="hidden fallback-icon">
                         {mode === 'tv' ? <Tv className={`w-5 h-5 ${styles.textDim}`} /> : <Radio className={`w-5 h-5 ${styles.textDim}`} /> }
                     </div>
                 </div>
                 
+                {/* 频道名称 */}
                 <span className={`text-xs font-medium leading-tight line-clamp-2 w-full ${isActive ? 'text-white font-bold' : styles.textMain}`}>
                     {channel.name}
                 </span>
                 
+                {/* 播放状态指示 (仅激活时显示) */}
                 {isActive && (
                     <div className="mt-auto pt-2 flex items-center gap-1 text-[10px] text-green-400 font-mono animate-pulse">
                         <Play className="w-2 h-2 fill-current" /> Playing
@@ -240,6 +246,7 @@ const ChannelCard: React.FC<{
                 )}
             </button>
             
+            {/* 底部高亮条 */}
             {isActive && (
                  <div className="absolute inset-x-0 bottom-0 h-0.5 bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]"></div>
             )}

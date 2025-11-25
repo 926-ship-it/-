@@ -1,5 +1,4 @@
-
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ChannelGrid } from './components/ChannelGrid';
@@ -140,6 +139,7 @@ const FAVORITES_COUNTRY: Country = {
 };
 
 const App: React.FC = () => {
+  const [isAppReady, setIsAppReady] = useState(false);
   const [countries, setCountries] = useState<Country[]>([]);
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -154,36 +154,93 @@ const App: React.FC = () => {
   const [activeReminder, setActiveReminder] = useState<Reminder | null>(null);
   const [settings, setSettings] = useState<AppSettings>({ enableSound: true });
   
-  const [favorites, setFavorites] = useState<Channel[]>(() => {
-      try {
-          const saved = localStorage.getItem('global_favorites');
-          return saved ? JSON.parse(saved) : [];
-      } catch (e) {
-          return [];
-      }
-  });
-
-  const [reminders, setReminders] = useState<Reminder[]>(() => {
-    try {
-        const saved = localStorage.getItem('global_reminders');
-        return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-        return [];
-    }
-  });
-
+  const [favorites, setFavorites] = useState<Channel[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [currentTheme, setCurrentTheme] = useState<AppTheme>(THEMES[0]);
 
+  // Audio Context for Global Sound Effects
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  // Global Sound Effect: Play a short "click/pop"
+  const playUiSound = useCallback(() => {
+      if (!settings.enableSound) return;
+      
+      try {
+          if (!audioCtxRef.current) {
+              audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+          }
+          const ctx = audioCtxRef.current;
+          
+          // Resume context if suspended (browser policy)
+          if (ctx.state === 'suspended') {
+              ctx.resume();
+          }
+
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+
+          // A pleasant "pop" sound
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(600, ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.1);
+
+          gain.gain.setValueAtTime(0.1, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+
+          osc.start();
+          osc.stop(ctx.currentTime + 0.1);
+      } catch (e) {
+          // Ignore audio errors (e.g. no hardware)
+      }
+  }, [settings.enableSound]);
+
+  // Global Event Listener for Clicks to play sound
   useEffect(() => {
-      localStorage.setItem('global_favorites', JSON.stringify(favorites));
-  }, [favorites]);
+      const handleGlobalClick = (e: MouseEvent) => {
+          // Check if the clicked element is interactive (button, link, input, or inside one)
+          const target = e.target as HTMLElement;
+          const interactive = target.closest('button') || target.closest('a') || target.closest('input') || target.closest('[role="button"]');
+          
+          if (interactive) {
+              playUiSound();
+          }
+      };
+
+      window.addEventListener('click', handleGlobalClick, true); // Capture phase
+      return () => window.removeEventListener('click', handleGlobalClick, true);
+  }, [playUiSound]);
+
+  // 1. Initialize stored data safely
+  useEffect(() => {
+      try {
+          const savedFavs = localStorage.getItem('global_favorites');
+          if (savedFavs) setFavorites(JSON.parse(savedFavs));
+          
+          const savedRems = localStorage.getItem('global_reminders');
+          if (savedRems) setReminders(JSON.parse(savedRems));
+      } catch (e) {
+          console.warn("Failed to load local storage", e);
+      }
+      setIsAppReady(true);
+  }, []);
 
   useEffect(() => {
-      localStorage.setItem('global_reminders', JSON.stringify(reminders));
-  }, [reminders]);
+      if (isAppReady) {
+        localStorage.setItem('global_favorites', JSON.stringify(favorites));
+      }
+  }, [favorites, isAppReady]);
 
   useEffect(() => {
-    // Sync channels with favorites if currently viewing Favorites
+      if (isAppReady) {
+        localStorage.setItem('global_reminders', JSON.stringify(reminders));
+      }
+  }, [reminders, isAppReady]);
+
+  // Sync channels with favorites if currently viewing Favorites
+  useEffect(() => {
     if (selectedCountry?.code === 'FAVORITES') {
         setChannels(favorites.filter(c => (c.type || 'tv') === mode));
     }
@@ -210,24 +267,39 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [reminders]);
 
+  // 2. Load Countries
   useEffect(() => {
     const loadCountries = async () => {
       try {
         const data = await fetchCountries();
-        setCountries([FAVORITES_COUNTRY, ...data]);
+        const allCountries = [FAVORITES_COUNTRY, ...data];
+        setCountries(allCountries);
         
-        const defaultCountry = data.find(c => c.code === 'US') || data[0];
+        let defaultCountry = data.find(c => c.code === 'CN');
+        if (!defaultCountry) defaultCountry = data.find(c => c.code === 'US');
+        if (!defaultCountry && data.length > 0) defaultCountry = data[0];
+        
+        // If no countries found (rare), fallback to favorites
         if (defaultCountry) {
             setSelectedCountry(defaultCountry);
+        } else {
+            setSelectedCountry(FAVORITES_COUNTRY);
         }
+
       } catch (err) {
-        console.error(err);
+        console.error("Init error:", err);
+        // Ensure we at least have Favorites if network totally fails
+        setCountries([FAVORITES_COUNTRY]);
+        setSelectedCountry(FAVORITES_COUNTRY);
       } finally {
         setLoadingCountries(false);
       }
     };
-    loadCountries();
-  }, []);
+    
+    if (isAppReady) {
+        loadCountries();
+    }
+  }, [isAppReady]);
 
   const loadContent = async (refresh = false) => {
     if (!selectedCountry) return;
@@ -249,7 +321,7 @@ const App: React.FC = () => {
     setLoadingChannels(true);
     if (!refresh) {
         setChannels([]);
-        setCurrentChannel(null); 
+        // Don't clear currentChannel to allow background play during navigation
     }
     
     try {
@@ -262,6 +334,7 @@ const App: React.FC = () => {
         setChannels(data);
     } catch (err) {
         console.error(err);
+        setChannels([]);
     } finally {
         setLoadingChannels(false);
     }
@@ -353,6 +426,17 @@ const App: React.FC = () => {
       }
   };
 
+  if (!isAppReady || !currentTheme) {
+      return (
+          <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+              <div className="flex flex-col items-center gap-4">
+                  <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <p className="font-mono text-sm">Loading App...</p>
+              </div>
+          </div>
+      );
+  }
+
   return (
     <div className={`flex h-screen ${currentTheme.styles.bgMain} ${currentTheme.styles.font} overflow-hidden transition-colors duration-500`}>
       <Sidebar 
@@ -398,9 +482,9 @@ const App: React.FC = () => {
             {/* 1. CINEMA STAGE AREA (Full Width) */}
             <div className={`w-full relative py-6 px-4 md:px-8 bg-black/40 shadow-2xl`}>
                 
-                {/* Ambilight/Glow Effect Background */}
+                {/* Ambilight/Glow Effect Background (Animated) */}
                 <div 
-                    className="absolute inset-0 opacity-20 pointer-events-none transition-colors duration-1000 blur-3xl"
+                    className="absolute inset-0 opacity-20 pointer-events-none transition-colors duration-1000 blur-3xl animate-pulse-glow"
                     style={{ background: `radial-gradient(circle at center, ${currentTheme.styles.accentColor} 0%, transparent 70%)` }}
                 ></div>
 

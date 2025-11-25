@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Country, AppTheme, Channel, AppSettings, Reminder } from '../types';
-import { Search, Globe, X, Tv, Radio, Palette, Star, Upload, Volume2, VolumeX, Settings, ChevronDown, ChevronUp, CalendarClock, Trash2, Play, Music } from 'lucide-react';
+import { Search, Globe, X, Tv, Radio, Palette, Star, Upload, Volume2, VolumeX, Settings, ChevronDown, ChevronUp, CalendarClock, Trash2, Play, Music, Plus } from 'lucide-react';
 
 interface SidebarProps {
   countries: Country[];
@@ -46,8 +46,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showThemes, setShowThemes] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  
-  // Default to showing favorites
   const [activeTab, setActiveTab] = useState<'favorites' | 'schedule' | null>('favorites');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +67,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return [...reminders].sort((a, b) => a.timeStr.localeCompare(b.timeStr));
   }, [reminders]);
 
-  // Auto open favorites if added
   useEffect(() => {
       if (modeFavorites.length > 0 && activeTab === null) {
           setActiveTab('favorites');
@@ -105,11 +102,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         <aside className={`
             fixed md:relative z-50 h-full ${styles.bgSidebar} w-80 flex flex-col
-            transition-all duration-300 ease-in-out
+            transition-transform duration-300 ease-in-out
             ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
             ${styles.shadow}
         `}>
-        <div className={`p-4 border-b ${styles.border} flex items-center justify-between`}>
+        
+        {/* HEADER */}
+        <div className={`p-4 border-b ${styles.border} flex items-center justify-between shrink-0`}>
             <div className={`flex items-center gap-2 ${styles.textMain}`}>
                 <Globe className="w-6 h-6" />
                 <h1 className="text-xl font-bold tracking-tight">全球看听</h1>
@@ -119,7 +118,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
         </div>
 
-        <div className="p-4 space-y-3 shrink-0">
+        {/* TOP NAVIGATION (Mode & Favorites) */}
+        <div className="p-4 pb-2 space-y-4 shrink-0">
             {/* Mode Switcher */}
             <div className={`flex p-1 ${styles.layoutShape} ${currentTheme.type === 'web95' ? styles.border : 'bg-black/10'}`}>
                 <button 
@@ -136,65 +136,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
             </div>
 
-            {/* Settings Toggles */}
-            <div>
-                 <button 
-                    onClick={() => setShowSettings(!showSettings)}
-                    className={`flex items-center justify-between w-full px-3 py-2 text-sm ${styles.button} ${styles.border} ${styles.layoutShape}`}
-                 >
-                    <span className="flex items-center gap-2"><Settings className="w-4 h-4" /> 设置</span>
-                    <span>{showSettings ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</span>
-                 </button>
-                 
-                 {showSettings && (
-                    <div className={`mt-2 p-2 ${styles.card} ${styles.layoutShape} flex flex-col gap-2 z-10 animate-in slide-in-from-top-2`}>
-                        <button
-                            onClick={onToggleSound}
-                            className={`flex items-center justify-between w-full px-3 py-2 text-xs ${styles.layoutShape} ${styles.button} hover:bg-white/5 transition-colors`}
-                        >
-                            <span className="flex items-center gap-2">
-                                {settings.enableSound ? <Volume2 className="w-3 h-3 text-green-500" /> : <VolumeX className="w-3 h-3 text-red-500" />}
-                                信号连接提示音
-                            </span>
-                            <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${settings.enableSound ? 'bg-green-500' : 'bg-gray-600'}`}>
-                                <div className={`w-3 h-3 bg-white rounded-full shadow-sm transition-transform ${settings.enableSound ? 'translate-x-4' : 'translate-x-0'}`}></div>
-                            </div>
-                        </button>
-                    </div>
-                 )}
-            </div>
-
-            {/* Theme Selector */}
-            <div>
-                 <button 
-                    onClick={() => setShowThemes(!showThemes)}
-                    className={`flex items-center justify-between w-full px-3 py-2 text-sm ${styles.button} ${styles.border} ${styles.layoutShape}`}
-                 >
-                    <span className="flex items-center gap-2"><Palette className="w-4 h-4" /> 风格切换</span>
-                    <span>{showThemes ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</span>
-                 </button>
-                 
-                 {showThemes && (
-                    <div className={`mt-2 p-2 ${styles.card} ${styles.layoutShape} grid grid-cols-1 gap-1 z-10 animate-in slide-in-from-top-2`}>
-                        {themes.map(t => (
-                            <button
-                                key={t.id}
-                                onClick={() => onThemeChange(t)}
-                                className={`
-                                    w-full text-left px-3 py-2 text-xs ${styles.layoutShape} transition-all
-                                    ${currentTheme.id === t.id ? styles.buttonActive : `${styles.textDim} hover:${styles.textMain} hover:bg-white/5`}
-                                `}
-                            >
-                                {t.name}
-                            </button>
-                        ))}
-                    </div>
-                 )}
-            </div>
-
-            {/* FAVORITES & SCHEDULE TAB SECTION */}
-            <div className={`pt-2 border-t ${styles.border}`}>
-                <div className="flex gap-2 mb-2">
+            {/* Favorites / Schedule Tabs */}
+            <div className={`space-y-2`}>
+                <div className="flex gap-2">
                     <button 
                         onClick={() => setActiveTab(activeTab === 'favorites' ? null : 'favorites')}
                         className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-bold ${styles.layoutShape} ${styles.border} transition-all ${activeTab === 'favorites' ? styles.buttonActive : styles.button}`}
@@ -209,9 +153,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                 </div>
 
-                {/* Favorites Content */}
+                {/* Tab Content */}
                 {activeTab === 'favorites' && (
-                    <div className={`p-2 ${styles.card} ${styles.layoutShape} z-10 space-y-1 max-h-56 overflow-y-auto ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'} animate-in slide-in-from-top-2`}>
+                    <div className={`p-2 ${styles.card} ${styles.layoutShape} z-10 space-y-1 max-h-48 overflow-y-auto ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'} animate-in slide-in-from-top-2`}>
                         {modeFavorites.length > 0 ? (
                             modeFavorites.map(channel => (
                                 <button
@@ -234,17 +178,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </button>
                             ))
                         ) : (
-                            <div className={`p-4 text-center text-xs ${styles.textDim} border-2 border-dashed ${styles.border} rounded opacity-70`}>
-                                <Star className="w-6 h-6 mx-auto mb-2 opacity-30" />
-                                暂无收藏。<br/>点击星星图标添加。
+                            <div className={`p-3 text-center text-xs ${styles.textDim} opacity-70`}>
+                                暂无收藏。点击列表中的星星添加。
                             </div>
                         )}
                     </div>
                 )}
 
-                {/* Schedule Content */}
                 {activeTab === 'schedule' && (
-                    <div className={`p-2 ${styles.card} ${styles.layoutShape} z-10 space-y-1 max-h-56 overflow-y-auto ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'} animate-in slide-in-from-top-2`}>
+                    <div className={`p-2 ${styles.card} ${styles.layoutShape} z-10 space-y-1 max-h-48 overflow-y-auto ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'} animate-in slide-in-from-top-2`}>
                         {sortedReminders.length > 0 ? (
                             sortedReminders.map(reminder => (
                                 <div key={reminder.id} className={`flex items-center justify-between p-1.5 ${styles.layoutShape} bg-white/5 group`}>
@@ -254,81 +196,125 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         </span>
                                         <span className={`text-xs truncate ${styles.textDim}`}>{reminder.channelName}</span>
                                     </div>
-                                    <div className="flex shrink-0 gap-1">
-                                        <button onClick={() => onPlayReminder(reminder.channelId)} className={`p-1 hover:text-green-400 ${styles.textDim}`} title="播放">
-                                            <Play className="w-3 h-3" />
-                                        </button>
-                                        <button onClick={() => onDeleteReminder(reminder.id)} className={`p-1 hover:text-red-400 ${styles.textDim}`} title="删除">
-                                            <Trash2 className="w-3 h-3" />
-                                        </button>
-                                    </div>
+                                    <button onClick={() => onDeleteReminder(reminder.id)} className={`p-1 hover:text-red-400 ${styles.textDim}`} title="删除">
+                                        <Trash2 className="w-3 h-3" />
+                                    </button>
                                 </div>
                             ))
                         ) : (
-                            <div className={`p-4 text-center text-xs ${styles.textDim} border-2 border-dashed ${styles.border} rounded opacity-70`}>
-                                <CalendarClock className="w-6 h-6 mx-auto mb-2 opacity-30" />
-                                暂无提醒。<br/>点击闹钟图标添加。
+                            <div className={`p-3 text-center text-xs ${styles.textDim} opacity-70`}>
+                                暂无提醒。
                             </div>
                         )}
                     </div>
                 )}
             </div>
-
-            <button 
-                onClick={() => fileInputRef.current?.click()}
-                className={`w-full flex items-center justify-center gap-2 py-2 mt-4 ${styles.layoutShape} ${styles.border} ${styles.button} text-xs transition-colors`}
-            >
-                <Upload className="w-3 h-3" /> 导入 M3U 列表
-            </button>
-            <input 
-                type="file" 
-                accept=".m3u,.m3u8" 
-                ref={fileInputRef} 
-                className="hidden" 
-                onChange={handleFileUpload}
-            />
-
-            {/* Spacer */}
-            <div className="h-4"></div>
         </div>
 
-        {/* Scrollable List - Countries only */}
-        <div className={`flex-1 overflow-y-auto p-4 pt-0 space-y-4 ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'}`}>
-            <div className="space-y-2">
-                <div className={`relative ${styles.input} ${styles.layoutShape} ${styles.border} flex items-center px-3 py-2 sticky top-0 z-10 shadow-sm`}>
+        {/* MIDDLE: Country List (Expands) */}
+        <div className={`flex-1 overflow-y-auto px-4 space-y-2 ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'}`}>
+            <div className={`sticky top-0 z-10 pt-2 pb-2 ${styles.bgSidebar}`}>
+                <div className={`relative ${styles.input} ${styles.layoutShape} ${styles.border} flex items-center px-3 py-2 shadow-sm`}>
                     <Search className={`w-4 h-4 ${styles.textDim}`} />
                     <input 
                         type="text" 
-                        placeholder="搜索国家..." 
+                        placeholder="搜索国家/地区..." 
                         className="bg-transparent border-none focus:outline-none text-sm w-full ml-2 placeholder-opacity-50"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                     />
                 </div>
-                
-                <div className="space-y-1">
-                    {filteredCountries.map(country => (
-                        <button
-                            key={country.code}
-                            onClick={() => {
-                                onSelectCountry(country);
-                                if (window.innerWidth < 768) onClose();
-                            }}
-                            className={`
-                                w-full flex items-center gap-3 p-2 ${styles.layoutShape} transition-all
-                                ${selectedCountry?.code === country.code 
-                                    ? styles.buttonActive
-                                    : `${styles.textDim} hover:${styles.textMain} hover:bg-white/5`
-                                }
-                            `}
-                        >
-                            <span className="text-xl shrink-0">{country.flag}</span>
-                            <span className="text-sm font-medium truncate">{country.name}</span>
-                            {selectedCountry?.code === country.code && (
-                                <div className={`ml-auto w-1.5 h-1.5 rounded-full ${currentTheme.type === 'cyber' ? 'bg-green-500' : 'bg-white'}`}></div>
-                            )}
-                        </button>
-                    ))}
+            </div>
+            
+            <div className="space-y-1 pb-2">
+                {filteredCountries.map(country => (
+                    <button
+                        key={country.code}
+                        onClick={() => {
+                            onSelectCountry(country);
+                            if (window.innerWidth < 768) onClose();
+                        }}
+                        className={`
+                            w-full flex items-center gap-3 p-2 ${styles.layoutShape} transition-all
+                            ${selectedCountry?.code === country.code 
+                                ? styles.buttonActive
+                                : `${styles.textDim} hover:${styles.textMain} hover:bg-white/5`
+                            }
+                        `}
+                    >
+                        <span className="text-xl shrink-0">{country.flag}</span>
+                        <span className="text-sm font-medium truncate">{country.name}</span>
+                        {selectedCountry?.code === country.code && (
+                            <div className={`ml-auto w-1.5 h-1.5 rounded-full ${currentTheme.type === 'cyber' ? 'bg-green-500' : 'bg-white'}`}></div>
+                        )}
+                    </button>
+                ))}
+            </div>
+        </div>
+
+        {/* BOTTOM: System / Settings / Import (Fixed Footer) */}
+        <div className={`p-4 pt-2 border-t ${styles.border} bg-black/5 space-y-2 mt-auto`}>
+            
+            {/* Import */}
+            <button 
+                onClick={() => fileInputRef.current?.click()}
+                className={`w-full flex items-center justify-center gap-2 py-2 ${styles.layoutShape} ${styles.border} ${styles.button} text-xs transition-colors opacity-80 hover:opacity-100`}
+            >
+                <Upload className="w-3 h-3" /> 导入 M3U
+            </button>
+            <input type="file" accept=".m3u,.m3u8" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+
+            <div className="flex gap-2">
+                {/* Settings Toggle */}
+                <div className="relative flex-1">
+                    <button 
+                        onClick={() => { setShowSettings(!showSettings); setShowThemes(false); }}
+                        className={`w-full flex items-center justify-center gap-2 px-2 py-2 text-xs ${styles.button} ${styles.border} ${styles.layoutShape} ${showSettings ? styles.buttonActive : ''}`}
+                    >
+                        <Settings className="w-3 h-3" /> 设置
+                    </button>
+                    {showSettings && (
+                        <div className={`absolute bottom-full left-0 w-full mb-2 p-2 ${styles.card} ${styles.layoutShape} z-50 shadow-xl`}>
+                            <button
+                                onClick={onToggleSound}
+                                className={`flex items-center justify-between w-full px-2 py-1.5 text-xs ${styles.layoutShape} ${styles.button} hover:bg-white/5`}
+                            >
+                                <span className="flex items-center gap-2">
+                                    {settings.enableSound ? <Volume2 className="w-3 h-3 text-green-500" /> : <VolumeX className="w-3 h-3 text-red-500" />}
+                                    提示音
+                                </span>
+                                <div className={`w-6 h-3 rounded-full p-0.5 transition-colors ${settings.enableSound ? 'bg-green-500' : 'bg-gray-600'}`}>
+                                    <div className={`w-2 h-2 bg-white rounded-full shadow-sm transition-transform ${settings.enableSound ? 'translate-x-3' : 'translate-x-0'}`}></div>
+                                </div>
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* Theme Toggle */}
+                <div className="relative flex-1">
+                    <button 
+                        onClick={() => { setShowThemes(!showThemes); setShowSettings(false); }}
+                        className={`w-full flex items-center justify-center gap-2 px-2 py-2 text-xs ${styles.button} ${styles.border} ${styles.layoutShape} ${showThemes ? styles.buttonActive : ''}`}
+                    >
+                        <Palette className="w-3 h-3" /> 风格
+                    </button>
+                    {showThemes && (
+                        <div className={`absolute bottom-full right-0 w-48 mb-2 p-2 ${styles.card} ${styles.layoutShape} grid grid-cols-1 gap-1 z-50 shadow-xl`}>
+                            {themes.map(t => (
+                                <button
+                                    key={t.id}
+                                    onClick={() => { onThemeChange(t); setShowThemes(false); }}
+                                    className={`
+                                        w-full text-left px-3 py-2 text-xs ${styles.layoutShape} transition-all
+                                        ${currentTheme.id === t.id ? styles.buttonActive : `${styles.textDim} hover:${styles.textMain} hover:bg-white/5`}
+                                    `}
+                                >
+                                    {t.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

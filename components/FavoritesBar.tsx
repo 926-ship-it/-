@@ -1,7 +1,6 @@
-
 import React from 'react';
 import { Channel, AppTheme } from '../types';
-import { Star, Tv, Radio, Play } from 'lucide-react';
+import { Star, Tv, Radio } from 'lucide-react';
 
 interface FavoritesBarProps {
   favorites: Channel[];
@@ -21,22 +20,27 @@ export const FavoritesBar: React.FC<FavoritesBarProps> = ({
   const { styles } = theme;
   const filteredFavorites = favorites.filter(c => (c.type || 'tv') === mode);
 
-  // 如果没有收藏，显示一个极其简约的提示，不占太多空间
+  // 极简提示条
   if (filteredFavorites.length === 0) {
       return (
-        <div className={`w-full mb-4 shrink-0 flex items-center gap-2 py-3 px-4 rounded-xl border border-dashed ${styles.border} opacity-50`}>
-            <Star className="w-4 h-4" />
-            <span className={`text-xs ${styles.textDim}`}>快捷收藏栏: 点击频道旁的星星即可固定在此处</span>
+        <div className={`w-full mb-2 shrink-0 flex items-center gap-2 py-2 px-3 rounded-lg border border-dashed ${styles.border} opacity-40 hover:opacity-80 transition-opacity cursor-default`}>
+            <Star className="w-3 h-3" />
+            <span className={`text-[10px] ${styles.textDim}`}>快捷收藏栏: 暂无内容</span>
         </div>
       );
   }
 
   return (
-    <div className={`w-full mb-4 shrink-0 animate-in slide-in-from-left duration-500`}>
+    <div className={`w-full mb-2 shrink-0 animate-in slide-in-from-left duration-500`}>
       <div className={`
-        flex gap-3 overflow-x-auto pb-4 pt-1 px-1 scrollbar-thin scroll-smooth snap-x
+        flex gap-2 overflow-x-auto pb-2 pt-1 px-1 scrollbar-thin scroll-smooth snap-x items-center
         ${theme.type === 'web95' ? 'scrollbar-web95' : ''}
       `}>
+        {/* 标题小标签 */}
+        <div className={`shrink-0 text-[10px] font-bold writing-vertical-lr ${styles.textDim} opacity-50 hidden sm:block`}>
+            FAV
+        </div>
+
         {filteredFavorites.map(channel => {
             const isActive = currentChannel?.id === channel.id;
             return (
@@ -44,32 +48,36 @@ export const FavoritesBar: React.FC<FavoritesBarProps> = ({
                     key={channel.id}
                     onClick={() => onSelectChannel(channel)}
                     className={`
-                        group relative flex items-center gap-3 p-2 pr-4 shrink-0 min-w-[140px] snap-start
-                        ${styles.layoutShape} transition-all duration-300
+                        group relative flex items-center gap-2 p-1.5 pr-3 shrink-0 max-w-[140px] snap-start
+                        ${styles.layoutShape} transition-all duration-300 border border-transparent
                         ${isActive 
-                            ? `${styles.buttonActive} shadow-lg ring-1 ring-white/20 translate-y-0` 
-                            : `${styles.button} hover:bg-white/10 hover:-translate-y-1`}
-                        ${theme.type === 'web95' && isActive ? 'border-2 border-white' : ''}
+                            ? `${styles.buttonActive} shadow-md ring-1 ring-white/20 translate-y-0` 
+                            : `${styles.button} hover:bg-white/10 hover:scale-[1.02]`}
+                        ${theme.type === 'web95' && isActive ? 'border-white' : ''}
                     `}
+                    title={channel.name}
                 >
-                    <div className={`w-10 h-10 shrink-0 rounded flex items-center justify-center bg-black/20 overflow-hidden ${styles.border} border shadow-inner`}>
+                    {/* Icon */}
+                    <div className={`w-7 h-7 shrink-0 rounded flex items-center justify-center bg-black/20 overflow-hidden ${styles.border} border shadow-inner`}>
                         {channel.logo ? (
                             <img src={channel.logo} alt={channel.name} className="w-full h-full object-contain p-0.5" />
                         ) : (
-                            mode === 'tv' ? <Tv className="w-5 h-5 opacity-50" /> : <Radio className="w-5 h-5 opacity-50" />
+                            mode === 'tv' ? <Tv className="w-3.5 h-3.5 opacity-60" /> : <Radio className="w-3.5 h-3.5 opacity-60" />
                         )}
                     </div>
                     
-                    <div className="flex flex-col items-start min-w-0">
-                         <span className={`text-xs font-bold truncate w-full text-left ${isActive ? 'text-white' : styles.textMain}`}>
-                            {channel.name}
-                        </span>
-                        {isActive && (
-                             <span className="text-[10px] text-green-400 flex items-center gap-1">
-                                 <Play className="w-2 h-2 fill-current" /> Playing
-                             </span>
-                        )}
-                    </div>
+                    {/* Name */}
+                    <span className={`text-[11px] font-bold truncate ${isActive ? 'text-white' : styles.textMain}`}>
+                        {channel.name}
+                    </span>
+
+                    {/* Active Indicator Dot */}
+                    {isActive && (
+                         <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500 border border-white/50"></span>
+                         </span>
+                    )}
                 </button>
             );
         })}

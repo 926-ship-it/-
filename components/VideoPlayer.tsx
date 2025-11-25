@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { AlertCircle, Play, RefreshCw, Radio, Music, Square, Star, Captions, StopCircle, Volume2, VolumeX, Maximize, AlarmClock, Check, Clock } from 'lucide-react';
@@ -59,14 +58,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [showAlarmPicker, setShowAlarmPicker] = useState(false);
   const [alarmTime, setAlarmTime] = useState('');
 
+  // Audio Context for Tick Sound
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
   // Helper: Play Tick Sound
   const playTick = useCallback(() => {
       if (!settings.enableSound) return;
       try {
-          const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-          if (!AudioContext) return;
+          if (!audioCtxRef.current) {
+              audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+          }
+          const ctx = audioCtxRef.current;
+          if (ctx.state === 'suspended') ctx.resume();
           
-          const ctx = new AudioContext();
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           

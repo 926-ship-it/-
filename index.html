@@ -65,6 +65,15 @@
       .animate-record {
         animation: pulse-record 1.5s infinite ease-in-out;
       }
+
+      @keyframes pulse-glow {
+        0% { opacity: 0.15; transform: scale(1); }
+        50% { opacity: 0.3; transform: scale(1.05); }
+        100% { opacity: 0.15; transform: scale(1); }
+      }
+      .animate-pulse-glow {
+        animation: pulse-glow 4s infinite ease-in-out;
+      }
     </style>
   <script type="importmap">
 {
