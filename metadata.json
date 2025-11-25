@@ -1,0 +1,5 @@
+{
+  "name": "全球实时看和听",
+  "description": "A modern web application to watch live television channels from around the world, organized by country and region.",
+  "requestFramePermissions": []
+}
