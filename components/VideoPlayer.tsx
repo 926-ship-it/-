@@ -31,7 +31,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const { styles } = theme;
   
   // Dual Video Engine State
-  // 0 and 1 represent the two video elements. We toggle between them.
   const [activePlayerIndex, setActivePlayerIndex] = useState(0);
   const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
   const hlsRefs = useRef<(Hls | null)[]>([null, null]);
@@ -74,11 +73,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           osc.connect(gain);
           gain.connect(ctx.destination);
           
-          // Short high-pitched "tick" to indicate signal lock
           osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
           osc.type = 'sine';
           
-          // Quick envelope
           gain.gain.setValueAtTime(0.05, ctx.currentTime);
           gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
           
@@ -115,7 +112,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => clearInterval(interval);
   }, [country, channel]);
 
-  // Volume Sync: Apply volume to ALL players to ensure smooth transition
+  // Volume Sync
   useEffect(() => {
       videoRefs.forEach(ref => {
           if (ref.current) {
@@ -129,7 +126,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     const url = channel?.url;
     
-    // If no channel, just reset everything
     if (!url) {
         setLoading(false); 
         setSignalStrength(0);
@@ -137,32 +133,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         return;
     }
 
-    // Determine which player is currently active and which is the background "next" player
     const nextIndex = (activePlayerIndex + 1) % 2;
     const nextVideo = videoRefs[nextIndex].current;
     const currentVideo = videoRefs[activePlayerIndex].current;
 
     if (!nextVideo) return;
 
-    // If we are recording, stop it before switching channel context
     if (isRecording) handleStopRecording();
 
-    // Start loading process on the NEXT player
-    // We do NOT stop the current player yet. It keeps playing in the background.
-    
-    // Reset states for the new load
     setSignalStrength(1); 
     setShowTranslate(false);
     setError(null);
-    // Only show global loading spinner if the current player is NOT playing (initial load)
-    // otherwise we rely on the old video to mask the loading time
     if (!currentVideo || currentVideo.paused || currentVideo.ended) {
         setLoading(true);
     }
     
     setShowAlarmPicker(false);
 
-    // Cleanup previous HLS on the target player
     if (hlsRefs.current[nextIndex]) {
         hlsRefs.current[nextIndex]?.destroy();
         hlsRefs.current[nextIndex] = null;
@@ -171,22 +158,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const isHlsSource = url.includes('.m3u8');
     let hls: Hls | null = null;
 
-    // --- Event Handlers for the NEXT player ---
-
     const onReadyToSwitch = () => {
-        // Signal is stable (canplay / manifest parsed)
-        playTick(); // Sound effect
-        setActivePlayerIndex(nextIndex); // SWITCH VISIBILITY
+        playTick(); 
+        setActivePlayerIndex(nextIndex);
         setIsPlaying(true);
         setLoading(false);
         setSignalStrength(4);
 
-        // Attempt autoplay
         if (autoPlay) {
             nextVideo.play().catch(e => console.log("Autoplay prevented", e));
         }
 
-        // Cleanup the OLD player after a short delay to allow CSS fade
         setTimeout(() => {
             if (currentVideo) {
                 currentVideo.pause();
@@ -201,11 +183,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
 
     const onError = (e: any) => {
-        // If the new channel fails, we should show error and maybe stop the old one
-        console.error("Stream Error", e);
-        // Only update UI error if we are committed to this player or force switch
+        // Improve error logging
+        const msg = e instanceof Event ? (e.type === 'error' ? 'Network/Format Error' : e.type) : e;
+        console.warn("Stream Error:", msg);
+        
         if (activePlayerIndex !== nextIndex) {
-             // Force switch to show error
              setActivePlayerIndex(nextIndex);
         }
         setError(isRadio ? "电台无法连接" : "直播流无法播放");
@@ -213,17 +195,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setSignalStrength(0);
     };
 
-    // Setup Listeners
     const cleanupListeners = () => {
         nextVideo.removeEventListener('error', onError);
         nextVideo.removeEventListener('canplay', onReadyToSwitch);
     };
 
     nextVideo.addEventListener('error', onError);
-    // We use 'canplay' as the signal stable indicator for native video
     nextVideo.addEventListener('canplay', onReadyToSwitch);
 
-    // Initialize Source
     if (isHlsSource && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
@@ -236,8 +215,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       hls.attachMedia(nextVideo);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-         // HLS often ready before 'canplay', but we wait for canplay for video frames
-         // Or we can trigger here if we prefer faster switching
          if (autoPlay) nextVideo.play().catch(() => {});
       });
 
@@ -258,19 +235,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       });
     } else {
-      // Native HLS or MP4/MP3
       nextVideo.src = url;
       nextVideo.load();
     }
 
-    // Cleanup function when effect unmounts (e.g. component destroyed, though this effect runs on url change)
     return () => {
         cleanupListeners();
     };
 
-  }, [channel?.url, channel?.id]); // Re-run when channel changes
+  }, [channel?.url, channel?.id]);
 
-  // Play/Pause toggle for ACTIVE player
   const togglePlay = () => {
     const video = videoRefs[activePlayerIndex].current;
     if (!video) return;
@@ -283,7 +257,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  // Recording uses the ACTIVE player
   const handleStartRecording = () => {
     const video = videoRefs[activePlayerIndex].current;
     if (!video) return;
@@ -317,7 +290,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             
             setIsRecording(false);
 
-            // Save Logic
             // @ts-ignore
             if (window.showSaveFilePicker) {
                 try {
@@ -388,7 +360,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         ${styles.border} ${theme.type === 'web95' ? 'bg-black' : styles.bgSidebar}
       `}>
         
-        {/* Web 95 Title Bar */}
         {theme.type === 'web95' && (
              <div className="absolute top-0 left-0 right-0 h-8 bg-[#000080] flex items-center justify-between px-2 z-20 select-none">
                  <span className="text-white font-bold text-xs">Media Player - {channel.name}</span>
@@ -400,7 +371,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
              </div>
         )}
 
-        {/* DUAL VIDEO PLAYERS */}
+        {/* DUAL VIDEO PLAYERS - Removed crossOrigin to fix stream errors */}
         {[0, 1].map((index) => (
             <video
                 key={index}
@@ -412,7 +383,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     zIndex: activePlayerIndex === index ? 1 : 0
                 }}
                 playsInline
-                crossOrigin="anonymous" 
             />
         ))}
 
@@ -461,7 +431,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onClick={() => {
                   setLoading(true);
                   setError(null);
-                  // Try to reload current engine
                   const currentHls = hlsRefs.current[activePlayerIndex];
                   const currentVid = videoRefs[activePlayerIndex].current;
                   if(currentHls) currentHls.startLoad();
@@ -474,12 +443,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         )}
 
-        {/* Video Controls Overlay */}
         <div className={`
              absolute inset-0 z-20 flex flex-col justify-between p-4 transition-opacity duration-300
              ${theme.type === 'web95' ? 'opacity-100 pointer-events-none' : 'opacity-0 group-hover:opacity-100 bg-gradient-to-t from-black/80 via-transparent to-black/40'}
         `}>
-             {/* Top Bar */}
             <div className={`flex justify-between items-start pointer-events-auto ${theme.type === 'web95' ? 'mt-8' : ''}`}>
                  <div className="bg-red-600 px-2 py-1 rounded text-xs font-bold text-white border border-white/10 animate-pulse">
                     LIVE
@@ -493,7 +460,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                  )}
             </div>
 
-            {/* Bottom Controls */}
             <div className={`flex items-center gap-4 pointer-events-auto ${theme.type === 'web95' ? 'bg-[#c0c0c0] p-2 border-2 border-t-white border-l-white border-r-black border-b-black' : ''}`}>
                 <button 
                     onClick={togglePlay}
@@ -502,7 +468,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     {isPlaying ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
                 </button>
 
-                {/* Volume Control with Slider */}
                 <div 
                     className="flex items-center gap-2 group/vol relative"
                     onMouseEnter={() => setShowVolumeSlider(true)}
@@ -534,7 +499,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <div className="flex-1"></div>
 
                 <div className="flex items-center gap-2 relative">
-                    {/* Alarm */}
                     <div className="relative">
                         <button
                             onClick={() => setShowAlarmPicker(!showAlarmPicker)}
