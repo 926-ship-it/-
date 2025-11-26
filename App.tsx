@@ -58,26 +58,26 @@ const THEMES: AppTheme[] = [
     }
   },
   {
-    id: 'cyber',
-    name: '极简科技 (Cyber)',
-    type: 'cyber',
+    id: 'kids',
+    name: '儿童乐园 (Kids)',
+    type: 'kids',
     styles: {
-      bgMain: 'bg-[#050505]',
-      bgSidebar: 'bg-black/90 border-r border-green-500/30 backdrop-blur-sm',
-      textMain: 'text-green-400 text-shadow-sm',
-      textDim: 'text-green-900',
-      border: 'border border-green-500/40',
-      card: 'bg-black/60 border border-green-900/50 hover:border-green-400 hover:bg-green-900/10 backdrop-blur-sm',
-      cardHover: 'hover:shadow-[0_0_15px_rgba(34,197,94,0.3)]',
-      button: 'bg-black border border-green-800 text-green-600 hover:bg-green-900/20 hover:border-green-500',
-      buttonActive: 'bg-green-500/10 text-green-400 border-green-400 shadow-[0_0_10px_rgba(34,197,94,0.4)]',
-      buttonPrimary: 'bg-green-600 text-black hover:bg-green-500 font-bold tracking-wider',
-      input: 'bg-black border border-green-800 text-green-500 placeholder:text-green-900 focus:border-green-400',
-      font: 'font-[JetBrains_Mono,monospace]',
-      layoutShape: 'rounded-none',
-      shadow: 'shadow-none',
-      accentColor: '#22c55e',
-      bgPattern: 'bg-grid-pattern animate-grid-move' // Moving Grid
+      bgMain: 'bg-[#FFF9C4]', // Soft Cream/Pastel Yellow
+      bgSidebar: 'bg-[#B2EBF2] border-r-4 border-white', // Pastel Cyan
+      textMain: 'text-[#5D4037] font-bold', // Warm Brown text
+      textDim: 'text-[#8D6E63]',
+      border: 'border-4 border-white',
+      card: 'bg-white border-4 border-[#FFCC80] hover:border-[#FFAB91] shadow-[4px_4px_0px_0px_rgba(255,171,145,0.5)] rounded-3xl transition-all',
+      cardHover: 'hover:-translate-y-2 hover:rotate-1',
+      button: 'bg-white border-4 border-[#AED581] text-[#5D4037] rounded-full shadow-md hover:bg-[#DCEDC8]',
+      buttonActive: 'bg-[#FFAB91] text-white border-[#FF8A65] shadow-inner',
+      buttonPrimary: 'bg-[#FF7043] text-white border-4 border-white shadow-[0_4px_0_0_#D84315] hover:bg-[#F4511E] active:shadow-none active:translate-y-1',
+      input: 'bg-white border-4 border-[#B39DDB] text-[#5D4037] rounded-full px-6 focus:border-[#9575CD]',
+      font: 'font-[Quicksand,sans-serif]',
+      layoutShape: 'rounded-[2rem]',
+      shadow: 'shadow-xl',
+      accentColor: '#FF7043',
+      bgPattern: 'bg-kids-pattern'
     }
   },
   {
@@ -139,6 +139,11 @@ const App: React.FC = () => {
   const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
   const [customChannels, setCustomChannels] = useState<Channel[]>([]);
   
+  // Sticky Player State
+  const [isSticky, setIsSticky] = useState(false);
+  const [stickyEnabled, setStickyEnabled] = useState(true);
+  const playerMarkerRef = useRef<HTMLDivElement>(null);
+
   const [loadingCountries, setLoadingCountries] = useState(true);
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -185,6 +190,28 @@ const App: React.FC = () => {
       window.addEventListener('click', handleGlobalClick, true); 
       return () => window.removeEventListener('click', handleGlobalClick, true);
   }, [playUiSound]);
+
+  // --- Sticky Player Observer ---
+  useEffect(() => {
+      const observer = new IntersectionObserver(
+          ([entry]) => {
+              if (!stickyEnabled) {
+                  setIsSticky(false);
+                  return;
+              }
+              // If the marker above the player is NOT intersecting (meaning scrolled past)
+              // AND we have a playing channel, enable sticky.
+              setIsSticky(!entry.isIntersecting);
+          },
+          { threshold: 0, rootMargin: "-100px 0px 0px 0px" } 
+      );
+
+      if (playerMarkerRef.current) {
+          observer.observe(playerMarkerRef.current);
+      }
+
+      return () => observer.disconnect();
+  }, [stickyEnabled]);
 
   useEffect(() => {
       try {
@@ -354,7 +381,7 @@ const App: React.FC = () => {
                                 <Tv className={`w-6 h-6 ${currentTheme.styles.textMain}`} />
                             </div>
                             <div>
-                                <h2 className={`text-3xl font-black tracking-tight bg-gradient-to-r from-white via-white/80 to-white/50 bg-clip-text text-transparent ${currentTheme.type === 'web95' ? 'text-black bg-none' : ''}`}>
+                                <h2 className={`text-3xl font-black tracking-tight bg-gradient-to-r from-white via-white/80 to-white/50 bg-clip-text text-transparent ${currentTheme.type === 'web95' ? 'text-black bg-none' : ''} ${currentTheme.type === 'kids' ? '!text-[#5D4037] !bg-none' : ''}`}>
                                     {selectedCountry ? selectedCountry.name : '全球看听'}
                                 </h2>
                                 <p className={`text-xs font-bold uppercase tracking-widest ${currentTheme.styles.textDim} mt-1 flex items-center gap-1`}>
@@ -370,8 +397,24 @@ const App: React.FC = () => {
 
                     <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={handleChannelSelect} theme={currentTheme} mode={mode} />
 
-                    <div className="mt-4">
-                        <VideoPlayer channel={currentChannel} country={selectedCountry} autoPlay={true} isRadio={mode === 'radio'} theme={currentTheme} isFavorite={isFavorite(currentChannel)} onToggleFavorite={() => currentChannel && toggleFavorite(currentChannel)} onAddReminder={handleAddReminder} settings={settings} />
+                    {/* MARKER FOR INTERSECTION OBSERVER */}
+                    <div ref={playerMarkerRef} className="w-full h-1"></div>
+
+                    {/* VIDEO PLAYER CONTAINER - PREVENT LAYOUT SHIFT */}
+                    <div className="mt-4 min-h-[300px] md:min-h-[450px] relative">
+                        <VideoPlayer 
+                            channel={currentChannel} 
+                            country={selectedCountry} 
+                            autoPlay={true} 
+                            isRadio={mode === 'radio'} 
+                            theme={currentTheme} 
+                            isFavorite={isFavorite(currentChannel)} 
+                            onToggleFavorite={() => currentChannel && toggleFavorite(currentChannel)} 
+                            onAddReminder={handleAddReminder} 
+                            settings={settings} 
+                            isSticky={isSticky}
+                            onCloseSticky={() => setStickyEnabled(false)}
+                        />
                     </div>
                 </div>
             </div>

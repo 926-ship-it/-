@@ -42,7 +42,7 @@ export interface ThemeStyles {
 export interface AppTheme {
   id: string;
   name: string;
-  type: 'default' | 'web95' | 'cyber' | 'acid' | 'glass' | 'cartoon';
+  type: 'default' | 'web95' | 'kids' | 'acid' | 'glass' | 'cartoon';
   styles: ThemeStyles;
 }
 

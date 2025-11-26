@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
-import { AlertCircle, Play, RefreshCw, Radio, Music, Square, Star, Captions, StopCircle, Volume2, VolumeX, Maximize, AlarmClock, Check, Clock } from 'lucide-react';
+import { AlertCircle, Play, RefreshCw, Radio, Music, Square, Star, Captions, StopCircle, Volume2, VolumeX, Maximize, AlarmClock, Check, Clock, X } from 'lucide-react';
 import { AppTheme, Channel, Country } from '../types';
 import { getTimezone } from '../services/iptvService';
 
@@ -14,6 +14,8 @@ interface VideoPlayerProps {
   onToggleFavorite: () => void;
   onAddReminder: (channel: Channel, time: string) => void;
   settings?: { enableSound: boolean };
+  isSticky?: boolean;
+  onCloseSticky?: () => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
@@ -25,7 +27,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     isFavorite,
     onToggleFavorite,
     onAddReminder,
-    settings = { enableSound: true }
+    settings = { enableSound: true },
+    isSticky = false,
+    onCloseSticky
 }) => {
   const { styles } = theme;
   
@@ -358,10 +362,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }
 
   return (
-    <div className="w-full space-y-4">
+    <div className={`w-full space-y-4 transition-all duration-300 ${isSticky ? 'fixed bottom-4 right-4 w-[320px] sm:w-[360px] z-[100]' : ''}`}>
+      {isSticky && onCloseSticky && (
+          <button 
+              onClick={(e) => {
+                  e.stopPropagation();
+                  onCloseSticky();
+              }}
+              className="absolute -top-3 -right-3 z-[110] bg-black text-white rounded-full p-1 shadow-lg hover:bg-red-500 transition-colors"
+          >
+              <X className="w-4 h-4" />
+          </button>
+      )}
+
       <div className={`
         relative w-full aspect-video ${styles.layoutShape} overflow-hidden shadow-2xl group 
         ${styles.border} ${theme.type === 'web95' ? 'bg-black' : styles.bgSidebar}
+        ${isSticky ? 'shadow-[0_0_30px_rgba(0,0,0,0.5)] ring-2 ring-white/10' : ''}
       `}>
         
         {theme.type === 'web95' && (
@@ -568,57 +585,59 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       </div>
 
-      <div className="flex items-start justify-between px-2">
-        <div className="flex items-center gap-3 overflow-hidden">
-             <div className={`w-10 h-10 ${styles.layoutShape} ${styles.bgSidebar} border ${styles.border} p-1.5 shrink-0`}>
-                 {channel.logo ? (
-                     <img src={channel.logo} alt="logo" className="w-full h-full object-contain" />
-                 ) : (
-                     isRadio ? <Radio className={`w-full h-full ${styles.textDim}`} /> : <TvIcon className={`w-full h-full ${styles.textDim}`} />
-                 )}
-             </div>
-             <div className="min-w-0">
-                 <div className="flex items-center gap-2">
-                    <h3 className={`font-bold text-lg ${styles.textMain} truncate`}>{channel.name}</h3>
+      {!isSticky && (
+          <div className="flex items-start justify-between px-2">
+            <div className="flex items-center gap-3 overflow-hidden">
+                <div className={`w-10 h-10 ${styles.layoutShape} ${styles.bgSidebar} border ${styles.border} p-1.5 shrink-0`}>
+                    {channel.logo ? (
+                        <img src={channel.logo} alt="logo" className="w-full h-full object-contain" />
+                    ) : (
+                        isRadio ? <Radio className={`w-full h-full ${styles.textDim}`} /> : <TvIcon className={`w-full h-full ${styles.textDim}`} />
+                    )}
+                </div>
+                <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                        <h3 className={`font-bold text-lg ${styles.textMain} truncate`}>{channel.name}</h3>
+                        
+                        <div className="flex items-end gap-0.5 h-4 w-6 ml-1" title={`Signal: ${signalStrength}/4`}>
+                            {[1,2,3,4].map(bar => (
+                                <div 
+                                    key={bar} 
+                                    className={`flex-1 rounded-sm transition-all duration-500 ${
+                                        signalStrength >= bar 
+                                            ? (signalStrength < 3 ? 'bg-yellow-500' : 'bg-green-500') 
+                                            : 'bg-white/10'
+                                    }`}
+                                    style={{ height: `${bar * 25}%` }}
+                                />
+                            ))}
+                        </div>
+
+                        {/* Local Time Display */}
+                        <div className={`flex items-center gap-1 ml-3 px-2 py-0.5 ${styles.card} ${styles.layoutShape} text-xs ${styles.textDim} border ${styles.border}`}>
+                            <Clock className="w-3 h-3" />
+                            <span className="font-mono">{currentTimeStr}</span>
+                        </div>
+                    </div>
                     
-                    <div className="flex items-end gap-0.5 h-4 w-6 ml-1" title={`Signal: ${signalStrength}/4`}>
-                         {[1,2,3,4].map(bar => (
-                             <div 
-                                key={bar} 
-                                className={`flex-1 rounded-sm transition-all duration-500 ${
-                                    signalStrength >= bar 
-                                        ? (signalStrength < 3 ? 'bg-yellow-500' : 'bg-green-500') 
-                                        : 'bg-white/10'
-                                }`}
-                                style={{ height: `${bar * 25}%` }}
-                             />
-                         ))}
-                    </div>
+                    <p className={`text-sm ${styles.textDim} truncate opacity-80`}>
+                        {isRadio ? '正在广播' : '正在直播'} • {channel.group || 'General'}
+                    </p>
+                </div>
+            </div>
 
-                    {/* Local Time Display */}
-                    <div className={`flex items-center gap-1 ml-3 px-2 py-0.5 ${styles.card} ${styles.layoutShape} text-xs ${styles.textDim} border ${styles.border}`}>
-                        <Clock className="w-3 h-3" />
-                        <span className="font-mono">{currentTimeStr}</span>
-                    </div>
-                 </div>
-                 
-                 <p className={`text-sm ${styles.textDim} truncate opacity-80`}>
-                     {isRadio ? '正在广播' : '正在直播'} • {channel.group || 'General'}
-                 </p>
-             </div>
-        </div>
-
-        <button 
-            onClick={onToggleFavorite}
-            className={`p-2.5 ${styles.layoutShape} border transition-all ${
-                isFavorite 
-                ? 'bg-yellow-500/10 border-yellow-500/50 text-yellow-500' 
-                : `${styles.button} ${styles.border}`
-            }`}
-        >
-            <Star className={`w-5 h-5 ${isFavorite ? 'fill-yellow-500' : ''}`} />
-        </button>
-      </div>
+            <button 
+                onClick={onToggleFavorite}
+                className={`p-2.5 ${styles.layoutShape} border transition-all ${
+                    isFavorite 
+                    ? 'bg-yellow-500/10 border-yellow-500/50 text-yellow-500' 
+                    : `${styles.button} ${styles.border}`
+                }`}
+            >
+                <Star className={`w-5 h-5 ${isFavorite ? 'fill-yellow-500' : ''}`} />
+            </button>
+          </div>
+      )}
     </div>
   );
 };
