@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Country, AppTheme, Channel, AppSettings, Reminder } from '../types';
-import { Search, Globe, X, Tv, Radio, Palette, Star, Upload, Volume2, VolumeX, Settings, ChevronDown, ChevronUp, CalendarClock, Trash2, Play, Music, Plus, History } from 'lucide-react';
+import { Search, Globe, X, Tv, Radio, Palette, Star, Upload, Volume2, VolumeX, Settings, ChevronDown, ChevronUp, CalendarClock, Trash2, Play, Music, Plus, History, Layers } from 'lucide-react';
 
 interface SidebarProps {
   countries: Country[];
@@ -26,25 +26,9 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
-    countries, 
-    selectedCountry, 
-    onSelectCountry,
-    isOpen,
-    onClose,
-    mode,
-    onModeChange,
-    themes,
-    currentTheme,
-    onThemeChange,
-    favorites,
-    onSelectFavorite,
-    onImportM3U,
-    settings,
-    onToggleSound,
-    reminders,
-    onDeleteReminder,
-    onPlayReminder,
-    history
+    countries, selectedCountry, onSelectCountry, isOpen, onClose, mode, onModeChange, themes,
+    currentTheme, onThemeChange, favorites, onSelectFavorite, onImportM3U, settings,
+    onToggleSound, reminders, onDeleteReminder, onPlayReminder, history
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showThemes, setShowThemes] = useState(false);
@@ -55,150 +39,156 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredCountries = useMemo(() => {
     if (!searchQuery) return countries;
     const lowerQ = searchQuery.toLowerCase();
-    return countries.filter(c => 
-      c.name.toLowerCase().includes(lowerQ) || 
-      c.code.toLowerCase().includes(lowerQ)
-    );
+    return countries.filter(c => c.name.toLowerCase().includes(lowerQ) || c.code.toLowerCase().includes(lowerQ));
   }, [countries, searchQuery]);
 
   const modeFavorites = useMemo(() => favorites.filter(c => (c.type || 'tv') === mode), [favorites, mode]);
-  const modeHistory = useMemo(() => history.filter(c => (c.type || 'tv') === mode), [history, mode]);
-
   const { styles } = currentTheme;
 
   return (
     <>
-        {isOpen && <div className="fixed inset-0 bg-black/80 z-40 md:hidden backdrop-blur-xl" onClick={onClose} />}
+        {isOpen && <div className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-xl transition-all" onClick={onClose} />}
 
         <aside className={`
-            fixed md:relative z-50 h-full ${styles.bgSidebar} w-80 flex flex-col min-w-0
-            transition-transform duration-500 ease-in-out
+            fixed md:relative z-50 h-full ${styles.bgSidebar} w-85 flex flex-col min-w-0
+            transition-all duration-700 cubic-bezier(0.4, 0, 0.2, 1)
             ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-            ${styles.shadow}
+            ${styles.shadow} shadow-2xl
         `}>
         
-        <div className={`p-6 border-b ${styles.border} flex items-center justify-between shrink-0 min-w-0`}>
-            <div className={`flex items-center gap-3 ${styles.textMain} min-w-0`}>
-                <div className={`p-2 ${styles.buttonPrimary} rounded-xl shadow-lg shrink-0`}>
+        <div className={`p-8 pb-6 border-b ${styles.border} flex items-center justify-between shrink-0`}>
+            <div className={`flex items-center gap-4 ${styles.textMain}`}>
+                <div className={`p-3 bg-white text-black rounded-2xl shadow-[0_10px_20px_rgba(255,255,255,0.1)] shrink-0`}>
                     <Globe className="w-5 h-5" />
                 </div>
-                <h1 className="text-xl font-black tracking-tighter truncate uppercase italic">全球智播</h1>
+                <div className="flex flex-col">
+                    <h1 className="text-2xl font-black tracking-tighter uppercase italic leading-none">Global</h1>
+                    <span className="text-[9px] font-black tracking-[0.4em] uppercase opacity-40 mt-1">Streaming Node</span>
+                </div>
             </div>
-            <button onClick={onClose} className={`md:hidden ${styles.textDim} p-1`}>
+            <button onClick={onClose} className={`md:hidden ${styles.textDim} p-2 hover:bg-white/5 rounded-full transition-colors`}>
                 <X className="w-6 h-6" />
             </button>
         </div>
 
-        <div className="p-5 pb-2 space-y-4 shrink-0">
-            <div className={`flex p-1 ${styles.layoutShape} ${currentTheme.type === 'web95' ? styles.border : 'bg-black/20'}`}>
+        <div className="p-6 space-y-6 shrink-0">
+            {/* Mode Switcher Pill */}
+            <div className={`flex p-1.5 ${styles.layoutShape} bg-black/40 border ${styles.border} shadow-inner`}>
                 <button 
                     onClick={() => onModeChange('tv')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 ${styles.layoutShape} text-xs font-black transition-all ${mode === 'tv' ? styles.buttonActive : styles.textDim}`}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 ${styles.layoutShape} text-[10px] font-black transition-all duration-500 uppercase tracking-widest ${mode === 'tv' ? `${styles.buttonActive} shadow-lg` : `${styles.textDim} hover:bg-white/5`}`}
                 >
-                    <Tv className="w-4 h-4" /> 电视模式
+                    <Tv className="w-4 h-4" /> Vision
                 </button>
                 <button 
                     onClick={() => onModeChange('radio')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 ${styles.layoutShape} text-xs font-black transition-all ${mode === 'radio' ? styles.buttonActive : styles.textDim}`}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 ${styles.layoutShape} text-[10px] font-black transition-all duration-500 uppercase tracking-widest ${mode === 'radio' ? `${styles.buttonActive} shadow-lg` : `${styles.textDim} hover:bg-white/5`}`}
                 >
-                    <Radio className="w-4 h-4" /> 广播模式
+                    <Radio className="w-4 h-4" /> Waves
                 </button>
             </div>
 
-            <div className="flex gap-1">
+            <div className="flex gap-2">
                 {(['favorites', 'history', 'schedule'] as const).map((tab) => (
                     <button 
                         key={tab}
                         onClick={() => setActiveTab(activeTab === tab ? null : tab)}
-                        className={`flex-1 flex flex-col items-center justify-center py-2 ${styles.layoutShape} transition-all border ${activeTab === tab ? styles.buttonActive : `${styles.button} opacity-40`}`}
+                        className={`flex-1 flex flex-col items-center justify-center py-3 ${styles.layoutShape} transition-all border ${activeTab === tab ? styles.buttonActive : `${styles.card} border-transparent opacity-60 hover:opacity-100`}`}
                     >
-                        {tab === 'favorites' && <Star className="w-3.5 h-3.5 mb-1" />}
-                        {tab === 'history' && <History className="w-3.5 h-3.5 mb-1" />}
-                        {tab === 'schedule' && <CalendarClock className="w-3.5 h-3.5 mb-1" />}
-                        <span className="text-[9px] font-black uppercase tracking-tighter">{tab === 'favorites' ? '收藏' : tab === 'history' ? '记录' : '提醒'}</span>
+                        {tab === 'favorites' && <Star className={`w-4 h-4 mb-1.5 ${activeTab === tab ? 'fill-current' : ''}`} />}
+                        {tab === 'history' && <History className="w-4 h-4 mb-1.5" />}
+                        {tab === 'schedule' && <CalendarClock className="w-4 h-4 mb-1.5" />}
+                        <span className="text-[8px] font-black uppercase tracking-widest">{tab === 'favorites' ? 'Saved' : tab === 'history' ? 'Logs' : 'Alert'}</span>
                     </button>
                 ))}
             </div>
 
             {activeTab && (
-                <div className={`p-1.5 ${styles.card} ${styles.layoutShape} space-y-1 max-h-56 overflow-y-auto ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'} animate-in slide-in-from-top-2 duration-300 min-w-0`}>
+                <div className={`p-2 ${styles.card} ${styles.layoutShape} border ${styles.border} space-y-1.5 max-h-64 overflow-y-auto ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'} animate-in slide-in-from-top-4 duration-500 shadow-xl`}>
                     {activeTab === 'favorites' && (
                         modeFavorites.length > 0 ? modeFavorites.map(ch => (
-                            <button key={ch.id} onClick={() => { onSelectFavorite(ch); if (window.innerWidth < 768) onClose(); }} className={`w-full flex items-center gap-3 p-2.5 ${styles.layoutShape} hover:bg-white/10 text-left group min-w-0`}>
-                                <div className="w-7 h-7 rounded bg-black/40 shrink-0 flex items-center justify-center overflow-hidden">
-                                    {ch.logo ? <img src={ch.logo} className="w-full h-full object-contain" /> : <Tv className="w-3.5 h-3.5 opacity-20" />}
+                            <button key={ch.id} onClick={() => { onSelectFavorite(ch); if (window.innerWidth < 768) onClose(); }} className={`w-full flex items-center gap-4 p-3 ${styles.layoutShape} hover:bg-white/5 text-left group transition-all`}>
+                                <div className="w-9 h-9 rounded-xl bg-black/40 shrink-0 flex items-center justify-center overflow-hidden shadow-inner group-hover:scale-110 transition-transform">
+                                    {ch.logo ? <img src={ch.logo} className="w-full h-full object-contain p-1.5" /> : <Star className="w-4 h-4 opacity-20" />}
                                 </div>
-                                <span className={`text-[11px] font-black truncate flex-1 uppercase tracking-tight ${styles.textMain}`}>{ch.name}</span>
+                                <div className="flex flex-col min-w-0">
+                                    <span className={`text-[11px] font-black truncate uppercase tracking-tight ${styles.textMain}`}>{ch.name}</span>
+                                    <span className={`text-[8px] font-bold opacity-30 uppercase tracking-tighter`}>{ch.group || 'General'}</span>
+                                </div>
                             </button>
-                        )) : <p className="text-[10px] text-center p-6 opacity-30 font-bold uppercase italic">暂无收藏</p>
+                        )) : <div className="py-10 text-center text-[9px] font-black opacity-20 uppercase italic">Collection Empty</div>
                     )}
                 </div>
             )}
         </div>
 
-        <div className={`flex-1 overflow-y-auto px-5 space-y-1.5 ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'}`}>
-            <div className={`sticky top-0 z-10 pt-2 pb-3 ${styles.bgSidebar}`}>
-                <div className={`relative ${styles.input} ${styles.layoutShape} ${styles.border} flex items-center px-4 py-2.5 shadow-inner min-w-0`}>
-                    <Search className={`w-4 h-4 ${styles.textDim} shrink-0`} />
+        <div className={`flex-1 overflow-y-auto px-6 space-y-2 ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'}`}>
+            <div className={`sticky top-0 z-20 pt-2 pb-4 ${styles.bgSidebar}`}>
+                <div className={`relative ${styles.input} ${styles.layoutShape} border ${styles.border} flex items-center px-5 py-3.5 transition-all focus-within:ring-2 focus-within:ring-white/10 group shadow-inner`}>
+                    <Search className={`w-4 h-4 ${styles.textDim} group-focus-within:text-white transition-colors`} />
                     <input 
                         type="text" 
-                        placeholder="搜索国家/地区..." 
-                        className="bg-transparent border-none focus:outline-none text-xs w-full ml-3 font-black uppercase tracking-widest placeholder:opacity-30"
+                        placeholder="Search regions..." 
+                        className="bg-transparent border-none focus:outline-none text-[11px] w-full ml-4 font-black uppercase tracking-widest placeholder:opacity-30"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                     />
                 </div>
             </div>
             
-            <div className="space-y-1 pb-6 min-w-0">
+            <div className="space-y-1.5 pb-8">
                 {filteredCountries.map(country => (
                     <button
                         key={country.code}
                         onClick={() => { onSelectCountry(country); if (window.innerWidth < 768) onClose(); }}
                         className={`
-                            w-full flex items-center gap-4 p-3 ${styles.layoutShape} transition-all min-w-0
+                            w-full flex items-center gap-5 p-4 ${styles.layoutShape} transition-all group relative active:scale-95
                             ${selectedCountry?.code === country.code 
-                                ? styles.buttonActive
+                                ? `${styles.buttonActive} shadow-xl scale-[1.02] border-none` 
                                 : `${styles.textDim} hover:bg-white/5`
                             }
                         `}
                     >
-                        <span className="text-2xl shrink-0 drop-shadow-md">{country.flag}</span>
-                        <span className="text-xs font-black truncate uppercase tracking-tight flex-1 text-left">{country.name}</span>
+                        <span className="text-3xl shrink-0 group-hover:rotate-6 transition-transform filter drop-shadow-md">{country.flag}</span>
+                        <div className="flex flex-col min-w-0">
+                            <span className={`text-xs font-black truncate uppercase tracking-tight ${selectedCountry?.code === country.code ? 'text-black' : styles.textMain}`}>{country.name}</span>
+                            <span className={`text-[8px] font-black uppercase tracking-[0.2em] opacity-30 ${selectedCountry?.code === country.code ? 'text-black' : ''}`}>{country.code} Network</span>
+                        </div>
                         {selectedCountry?.code === country.code && (
-                            <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white shadow-lg animate-pulse"></div>
+                            <div className="ml-auto w-1.5 h-1.5 rounded-full bg-black shadow-lg animate-pulse"></div>
                         )}
                     </button>
                 ))}
             </div>
         </div>
 
-        <div className={`p-5 border-t ${styles.border} bg-black/10 space-y-3 shrink-0`}>
-            <button onClick={() => fileInputRef.current?.click()} className={`w-full flex items-center justify-center gap-2 py-3 ${styles.layoutShape} ${styles.border} ${styles.button} text-[10px] font-black uppercase tracking-widest transition-all hover:scale-[1.02]`}>
-                <Upload className="w-3.5 h-3.5" /> 导入 M3U 播放列表
+        <div className={`p-6 border-t ${styles.border} bg-black/10 space-y-4`}>
+            <button onClick={() => fileInputRef.current?.click()} className={`w-full flex items-center justify-center gap-3 py-4 ${styles.layoutShape} ${styles.border} ${styles.button} text-[10px] font-black uppercase tracking-widest transition-all hover:scale-[1.02] active:scale-95`}>
+                <Upload className="w-4 h-4" /> Global Link Protocol
             </button>
             <input type="file" accept=".m3u,.m3u8" ref={fileInputRef} className="hidden" onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (!f) return;
-                const r = new FileReader();
-                r.onload = (ev) => { if (ev.target?.result) onImportM3U(ev.target.result as string); };
-                r.readAsText(f);
-                e.target.value = '';
+                if (f) {
+                    const r = new FileReader();
+                    r.onload = (ev) => { if (ev.target?.result) onImportM3U(ev.target.result as string); };
+                    r.readAsText(f);
+                }
             }} />
 
-            <div className="flex gap-2">
-                <button onClick={() => { setShowSettings(!showSettings); setShowThemes(false); }} className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold ${styles.button} ${styles.border} ${styles.layoutShape} ${showSettings ? styles.buttonActive : ''}`}>
-                    <Settings className="w-4 h-4" /> 设置
+            <div className="flex gap-3">
+                <button onClick={() => { setShowSettings(!showSettings); setShowThemes(false); }} className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-[10px] font-black uppercase ${styles.button} ${styles.border} ${styles.layoutShape} transition-all ${showSettings ? styles.buttonActive : 'opacity-60'}`}>
+                    <Settings className="w-4 h-4" /> Setup
                 </button>
-                <button onClick={() => { setShowThemes(!showThemes); setShowSettings(false); }} className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold ${styles.button} ${styles.border} ${styles.layoutShape} ${showThemes ? styles.buttonActive : ''}`}>
-                    <Palette className="w-4 h-4" /> 主题
+                <button onClick={() => { setShowThemes(!showThemes); setShowSettings(false); }} className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-[10px] font-black uppercase ${styles.button} ${styles.border} ${styles.layoutShape} transition-all ${showThemes ? styles.buttonActive : 'opacity-60'}`}>
+                    <Palette className="w-4 h-4" /> Visuals
                 </button>
             </div>
             
             {showThemes && (
-                 <div className={`p-2 ${styles.card} ${styles.layoutShape} border ${styles.border} space-y-1 max-h-48 overflow-y-auto scrollbar-none`}>
+                 <div className={`p-2.5 ${styles.card} ${styles.layoutShape} border ${styles.border} space-y-1 max-h-56 overflow-y-auto scrollbar-none animate-in slide-in-from-bottom-4 duration-500 shadow-2xl`}>
+                    <div className="text-[8px] font-black uppercase tracking-widest opacity-20 mb-2 px-3">Available UI Protocols</div>
                     {themes.map(t => (
-                        <button key={t.id} onClick={() => { onThemeChange(t); setShowThemes(false); }} className={`w-full text-left px-3 py-2.5 text-[9px] font-black uppercase tracking-widest ${styles.layoutShape} ${currentTheme.id === t.id ? styles.buttonActive : 'hover:bg-white/5 opacity-60 hover:opacity-100'}`}>
+                        <button key={t.id} onClick={() => { onThemeChange(t); setShowThemes(false); }} className={`w-full text-left px-4 py-3 text-[10px] font-black uppercase tracking-widest ${styles.layoutShape} transition-all ${currentTheme.id === t.id ? styles.buttonActive : 'hover:bg-white/5 opacity-60 hover:opacity-100'}`}>
                             {t.name}
                         </button>
                     ))}
