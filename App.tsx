@@ -1,135 +1,128 @@
+
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ChannelGrid } from './components/ChannelGrid';
-import { ScheduleList } from './components/ScheduleList';
 import { FavoritesBar } from './components/FavoritesBar'; 
 import { AiChatPet } from './components/AiChatPet';
-import { AlarmModal } from './components/AlarmModal';
-import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, parseM3U } from './services/iptvService';
+import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, getTimezone } from './services/iptvService';
 import { Country, Channel, AppTheme, Reminder, AppSettings } from './types';
-import { Menu, RefreshCw, CalendarClock, Tv, Sparkles } from 'lucide-react';
+import { Menu, RefreshCw, Clock, Shuffle, History, ChevronRight, Tv } from 'lucide-react';
 
 const THEMES: AppTheme[] = [
   {
-    id: 'glass',
-    name: '透明亚克力 (Glass)',
+    id: 'cyber',
+    name: '赛博极客',
     type: 'glass',
     styles: {
-      bgMain: 'bg-gradient-to-br from-[#0f172a] via-[#1e1b4b] to-[#020617]', // Rich dark blue/purple
-      bgSidebar: 'bg-white/5 backdrop-blur-2xl border-r border-white/10',
-      textMain: 'text-white drop-shadow-sm',
-      textDim: 'text-slate-400',
+      bgMain: 'bg-[#050508]', 
+      bgSidebar: 'bg-black/40 backdrop-blur-3xl border-r border-white/5',
+      textMain: 'text-white font-sans tracking-tight',
+      textDim: 'text-gray-500',
       border: 'border-white/10',
-      card: 'bg-white/5 hover:bg-white/10 backdrop-blur-md border border-white/5 hover:border-white/20 transition-all duration-300',
-      cardHover: 'hover:-translate-y-1 shadow-lg hover:shadow-cyan-500/20',
-      button: 'bg-white/5 hover:bg-white/15 text-white backdrop-blur-sm border border-white/5',
-      buttonActive: 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-white border-white/20 shadow-[0_0_20px_rgba(6,182,212,0.2)]',
-      buttonPrimary: 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/30 hover:shadow-cyan-500/50',
-      input: 'bg-black/20 border-white/10 text-white placeholder:text-white/20 focus:bg-black/40 focus:border-cyan-500/50',
+      card: 'bg-white/5 backdrop-blur-xl border border-white/10 hover:border-cyan-500/40 transition-all duration-500',
+      cardHover: 'hover:shadow-[0_0_40px_rgba(6,182,212,0.1)] hover:-translate-y-0.5',
+      button: 'bg-white/5 hover:bg-white/10 text-white border border-white/10',
+      buttonActive: 'bg-cyan-500 text-black font-black shadow-[0_0_20px_rgba(6,182,212,0.4)]',
+      buttonPrimary: 'bg-white text-black hover:bg-cyan-400 transition-colors font-black',
+      input: 'bg-white/5 border-white/10 text-white focus:border-cyan-500/50',
       font: 'font-sans',
       layoutShape: 'rounded-2xl',
       shadow: 'shadow-2xl',
-      accentColor: '#06b6d4',
-      bgPattern: ''
+      accentColor: '#06b6d4'
     }
   },
   {
-    id: 'web95',
-    name: 'Web 1.0 (怀旧)',
-    type: 'web95',
-    styles: {
-      bgMain: 'bg-[#008080]', 
-      bgSidebar: 'bg-[#c0c0c0] border-r-2 border-r-black border-t-white',
-      textMain: 'text-black',
-      textDim: 'text-gray-600',
-      border: 'border-2 border-t-white border-l-white border-b-black border-r-black', 
-      card: 'bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black active:border-t-black active:border-l-black active:border-b-white active:border-r-white',
-      cardHover: '',
-      button: 'bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black active:border-t-black active:border-l-black active:border-b-white active:border-r-white text-black',
-      buttonActive: 'bg-[#c0c0c0] border-2 border-t-black border-l-black border-b-white border-r-white text-black font-bold',
-      buttonPrimary: 'bg-[#000080] text-white border-2 border-t-white border-l-white border-b-black border-r-black',
-      input: 'bg-white border-2 border-t-black border-l-black border-b-white border-r-white text-black font-mono',
-      font: 'font-[Arial,sans-serif]',
-      layoutShape: 'rounded-none',
-      shadow: '',
-      accentColor: '#000080',
-      bgPattern: ''
-    }
-  },
-  {
-    id: 'kids',
-    name: '儿童乐园 (Kids)',
+    id: 'candy',
+    name: '草莓软糖',
     type: 'kids',
     styles: {
-      bgMain: 'bg-[#FFF9C4]', // Soft Cream/Pastel Yellow
-      bgSidebar: 'bg-[#B2EBF2] border-r-4 border-white', // Pastel Cyan
-      textMain: 'text-[#5D4037] font-bold', // Warm Brown text
-      textDim: 'text-[#8D6E63]',
-      border: 'border-4 border-white',
-      card: 'bg-white border-4 border-[#FFCC80] hover:border-[#FFAB91] shadow-[4px_4px_0px_0px_rgba(255,171,145,0.5)] rounded-3xl transition-all',
-      cardHover: 'hover:-translate-y-2 hover:rotate-1',
-      button: 'bg-white border-4 border-[#AED581] text-[#5D4037] rounded-full shadow-md hover:bg-[#DCEDC8]',
-      buttonActive: 'bg-[#FFAB91] text-white border-[#FF8A65] shadow-inner',
-      buttonPrimary: 'bg-[#FF7043] text-white border-4 border-white shadow-[0_4px_0_0_#D84315] hover:bg-[#F4511E] active:shadow-none active:translate-y-1',
-      input: 'bg-white border-4 border-[#B39DDB] text-[#5D4037] rounded-full px-6 focus:border-[#9575CD]',
-      font: 'font-[Quicksand,sans-serif]',
-      layoutShape: 'rounded-[2rem]',
+      bgMain: 'bg-[#FFF5F7]', 
+      bgSidebar: 'bg-white border-r-4 border-pink-100',
+      textMain: 'text-pink-600 font-bold',
+      textDim: 'text-pink-300',
+      border: 'border-pink-100',
+      card: 'bg-white border-4 border-pink-50 shadow-[8px_8px_0px_#FFE4E8]',
+      cardHover: 'hover:translate-x-1 hover:translate-y-1 hover:shadow-none',
+      button: 'bg-white border-2 border-pink-100 text-pink-500',
+      buttonActive: 'bg-pink-500 text-white shadow-lg',
+      buttonPrimary: 'bg-pink-400 text-white hover:bg-pink-500 font-black',
+      input: 'bg-pink-50/30 border-2 border-pink-100 text-pink-600',
+      font: 'font-sans',
+      layoutShape: 'rounded-[32px]',
       shadow: 'shadow-xl',
-      accentColor: '#FF7043',
-      bgPattern: 'bg-kids-pattern'
+      accentColor: '#F472B6'
     }
   },
   {
     id: 'acid',
-    name: '醋酸少女 (Acid)',
+    name: '酸性流行',
     type: 'acid',
     styles: {
-      bgMain: 'bg-[#fef08a]', // Lemon Yellow
-      bgSidebar: 'bg-[#f472b6] border-r-4 border-black',
-      textMain: 'text-black font-black',
-      textDim: 'text-black/60 font-bold',
-      border: 'border-4 border-black',
-      card: 'bg-white border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all',
-      cardHover: '',
-      button: 'bg-[#c084fc] border-2 border-black text-white font-bold shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none',
-      buttonActive: 'bg-black text-white border-2 border-black',
-      buttonPrimary: 'bg-[#2563eb] text-white border-4 border-black font-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-[#3b82f6]',
-      input: 'bg-white border-4 border-black text-black font-bold placeholder:text-black/30',
-      font: 'font-[Inter,sans-serif]',
-      layoutShape: 'rounded-xl',
-      shadow: 'shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]',
-      accentColor: '#000000',
-      bgPattern: 'bg-dot-pattern' // Dots
+      bgMain: 'bg-[#000000]', 
+      bgSidebar: 'bg-[#000000] border-r-2 border-[#bfff00]',
+      textMain: 'text-[#bfff00] font-mono uppercase tracking-tighter',
+      textDim: 'text-[#bfff00]/40',
+      border: 'border-[#bfff00]',
+      card: 'bg-black border-2 border-[#bfff00] shadow-[4px_4px_0px_#bfff00]',
+      cardHover: 'hover:bg-[#bfff00] hover:text-black',
+      button: 'bg-black border border-[#bfff00] text-[#bfff00]',
+      buttonActive: 'bg-[#bfff00] text-black font-black',
+      buttonPrimary: 'bg-[#bfff00] text-black hover:invert font-black',
+      input: 'bg-black border-2 border-[#bfff00] text-[#bfff00]',
+      font: 'font-mono',
+      layoutShape: 'rounded-none',
+      shadow: 'none',
+      accentColor: '#bfff00'
     }
   },
   {
-    id: 'cartoon',
-    name: '冒险时光 (Cartoon)',
-    type: 'cartoon',
+    id: 'zen',
+    name: '禅意留白',
+    type: 'zen',
     styles: {
-      bgMain: 'bg-[#bae6fd]', // Sky Blue
-      bgSidebar: 'bg-[#fde047] border-r-4 border-black', // Jake Yellow
-      textMain: 'text-slate-900 font-extrabold tracking-tight',
-      textDim: 'text-slate-600 font-bold',
-      border: 'border-4 border-black',
-      card: 'bg-white border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-transform',
-      cardHover: 'hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:rotate-1',
-      button: 'bg-white border-4 border-black text-black shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] active:translate-x-[3px] active:translate-y-[3px] active:shadow-none rounded-full',
-      buttonActive: 'bg-[#ff69b4] text-white border-4 border-black', 
-      buttonPrimary: 'bg-[#ff4757] text-white border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-[#ff6b81]', 
-      input: 'bg-white border-4 border-black text-black shadow-[inset_3px_3px_0px_0px_rgba(0,0,0,0.1)]',
-      font: 'font-[Fredoka,sans-serif]',
-      layoutShape: 'rounded-[2rem]', 
-      shadow: 'shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]',
-      accentColor: '#ff4757',
-      bgPattern: 'bg-dot-pattern'
+      bgMain: 'bg-[#F9F7F2]', 
+      bgSidebar: 'bg-[#F2EFE9] border-r border-[#D9D4C7]',
+      textMain: 'text-[#4A453C] font-serif',
+      textDim: 'text-[#A6A08F]',
+      border: 'border-[#D9D4C7]',
+      card: 'bg-white border border-[#D9D4C7] shadow-sm',
+      cardHover: 'hover:shadow-md transition-shadow',
+      button: 'bg-white border border-[#D9D4C7] text-[#4A453C]',
+      buttonActive: 'bg-[#4A453C] text-white',
+      buttonPrimary: 'bg-[#8C8273] text-white hover:bg-[#4A453C]',
+      input: 'bg-[#F2EFE9] border border-[#D9D4C7] text-[#4A453C]',
+      font: 'font-serif',
+      layoutShape: 'rounded-lg',
+      shadow: 'shadow-none',
+      accentColor: '#8C8273'
+    }
+  },
+  {
+    id: 'retro95',
+    name: '极客 1995',
+    type: 'web95',
+    styles: {
+      bgMain: 'bg-[#008080]', 
+      bgSidebar: 'bg-[#c0c0c0] border-r-2 border-r-black border-t-white border-l-white',
+      textMain: 'text-black font-bold',
+      textDim: 'text-gray-700',
+      border: 'border-2 border-t-white border-l-white border-b-black border-r-black', 
+      card: 'bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black',
+      cardHover: 'active:scale-[0.98]',
+      button: 'bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black text-black',
+      buttonActive: 'bg-[#c0c0c0] border-2 border-t-black border-l-black border-b-white border-r-white text-black',
+      buttonPrimary: 'bg-[#000080] text-white border-2 border-t-white border-l-white border-b-black border-r-black',
+      input: 'bg-white border-2 border-t-black border-l-black border-b-white border-r-white text-black',
+      font: 'font-mono',
+      layoutShape: 'rounded-none',
+      shadow: 'none',
+      accentColor: '#000080'
     }
   }
 ];
 
-const CUSTOM_COUNTRY: Country = { name: '导入频道 (Custom)', code: 'CUSTOM', languages: [], flag: '📂' };
-const FAVORITES_COUNTRY: Country = { name: '我的收藏 (Favorites)', code: 'FAVORITES', languages: [], flag: '⭐' };
+const FAVORITES_COUNTRY: Country = { name: '我的收藏', code: 'FAVORITES', languages: [], flag: '⭐' };
 
 const App: React.FC = () => {
   const [isAppReady, setIsAppReady] = useState(false);
@@ -137,302 +130,166 @@ const App: React.FC = () => {
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
-  const [customChannels, setCustomChannels] = useState<Channel[]>([]);
-  
-  // Sticky Player State
-  const [isSticky, setIsSticky] = useState(false);
-  const [stickyEnabled, setStickyEnabled] = useState(true);
-  const playerMarkerRef = useRef<HTMLDivElement>(null);
-
-  const [loadingCountries, setLoadingCountries] = useState(true);
+  const [history, setHistory] = useState<Channel[]>([]);
+  const [localTime, setLocalTime] = useState('');
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mode, setMode] = useState<'tv' | 'radio'>('tv');
-  const [showSchedule, setShowSchedule] = useState(false);
-  const [activeReminder, setActiveReminder] = useState<Reminder | null>(null);
-  const [settings, setSettings] = useState<AppSettings>({ enableSound: true });
-  
   const [favorites, setFavorites] = useState<Channel[]>([]);
-  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [currentTheme, setCurrentTheme] = useState<AppTheme>(THEMES[0]);
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
-  const playUiSound = useCallback(() => {
-      if (!settings.enableSound) return;
-      try {
-          if (!audioCtxRef.current) {
-              audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-          }
-          const ctx = audioCtxRef.current;
-          if (ctx.state === 'suspended') ctx.resume();
-
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(600, ctx.currentTime);
-          osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.1);
-          gain.gain.setValueAtTime(0.1, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
-          osc.start();
-          osc.stop(ctx.currentTime + 0.1);
-      } catch (e) { /* ignore */ }
-  }, [settings.enableSound]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const tz = (selectedCountry && selectedCountry.code !== 'GLOBAL') ? getTimezone(selectedCountry.code) : 'UTC';
+      setLocalTime(new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: tz }).format(new Date()));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [selectedCountry]);
 
   useEffect(() => {
-      const handleGlobalClick = (e: MouseEvent) => {
-          const target = e.target as HTMLElement;
-          const interactive = target.closest('button') || target.closest('a') || target.closest('input') || target.closest('[role="button"]');
-          if (interactive) playUiSound();
-      };
-      window.addEventListener('click', handleGlobalClick, true); 
-      return () => window.removeEventListener('click', handleGlobalClick, true);
-  }, [playUiSound]);
-
-  // --- Sticky Player Observer ---
-  useEffect(() => {
-      const observer = new IntersectionObserver(
-          ([entry]) => {
-              if (!stickyEnabled) {
-                  setIsSticky(false);
-                  return;
-              }
-              // If the marker above the player is NOT intersecting (meaning scrolled past)
-              // AND we have a playing channel, enable sticky.
-              setIsSticky(!entry.isIntersecting);
-          },
-          { threshold: 0, rootMargin: "-100px 0px 0px 0px" } 
-      );
-
-      if (playerMarkerRef.current) {
-          observer.observe(playerMarkerRef.current);
-      }
-
-      return () => observer.disconnect();
-  }, [stickyEnabled]);
-
-  useEffect(() => {
-      try {
-          const savedFavs = localStorage.getItem('global_favorites');
-          if (savedFavs) setFavorites(JSON.parse(savedFavs));
-          const savedRems = localStorage.getItem('global_reminders');
-          if (savedRems) setReminders(JSON.parse(savedRems));
-      } catch (e) { console.warn(e); }
+    const init = async () => {
+      const data = await fetchCountries();
+      setCountries([FAVORITES_COUNTRY, ...data]);
+      const initial = data.find(c => c.code === 'GLOBAL') || data[0];
+      setSelectedCountry(initial);
+      const savedFavs = localStorage.getItem('global_favorites');
+      if (savedFavs) setFavorites(JSON.parse(savedFavs));
       setIsAppReady(true);
-  }, []);
-
-  useEffect(() => {
-      if (isAppReady) {
-        localStorage.setItem('global_favorites', JSON.stringify(favorites));
-        localStorage.setItem('global_reminders', JSON.stringify(reminders));
-      }
-  }, [favorites, reminders, isAppReady]);
-
-  useEffect(() => {
-    if (selectedCountry?.code === 'FAVORITES') {
-        setChannels(favorites.filter(c => (c.type || 'tv') === mode));
-    }
-  }, [favorites, selectedCountry, mode]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-        const now = new Date();
-        const currentHours = now.getHours().toString().padStart(2, '0');
-        const currentMinutes = now.getMinutes().toString().padStart(2, '0');
-        const currentTimeStr = `${currentHours}:${currentMinutes}`;
-        reminders.forEach(reminder => {
-            if (reminder.timeStr === currentTimeStr) {
-                 const lastAlerted = sessionStorage.getItem(`alerted_${reminder.id}_${currentTimeStr}`);
-                 if (!lastAlerted) {
-                     setActiveReminder(reminder);
-                     sessionStorage.setItem(`alerted_${reminder.id}_${currentTimeStr}`, 'true');
-                 }
-            }
-        });
-    }, 10000); 
-    return () => clearInterval(interval);
-  }, [reminders]);
-
-  useEffect(() => {
-    const loadCountries = async () => {
-      try {
-        const data = await fetchCountries();
-        setCountries([FAVORITES_COUNTRY, ...data]);
-        let defaultCountry = data.find(c => c.code === 'CN') || data.find(c => c.code === 'US') || data[0];
-        if (defaultCountry) setSelectedCountry(defaultCountry);
-        else setSelectedCountry(FAVORITES_COUNTRY);
-      } catch (err) {
-        setCountries([FAVORITES_COUNTRY]);
-        setSelectedCountry(FAVORITES_COUNTRY);
-      } finally {
-        setLoadingCountries(false);
-      }
     };
-    if (isAppReady) loadCountries();
-  }, [isAppReady]);
+    init();
+  }, []);
 
   const loadContent = async (refresh = false) => {
     if (!selectedCountry) return;
-    if (selectedCountry.code === 'CUSTOM') {
-        setChannels(customChannels);
-        setLoadingChannels(false);
-        return;
-    }
-    if (selectedCountry.code === 'FAVORITES') {
-        setChannels(favorites.filter(c => (c.type || 'tv') === mode));
-        setLoadingChannels(false);
-        return;
-    }
     setLoadingChannels(true);
-    if (!refresh) setChannels([]);
     try {
-        let data: Channel[] = [];
-        if (mode === 'tv') data = await fetchChannelsByCountry(selectedCountry.code, refresh);
-        else data = await fetchRadioStations(selectedCountry.code, refresh);
-        setChannels(data);
-    } catch (err) { setChannels([]); } 
-    finally { setLoadingChannels(false); }
+      const data = mode === 'tv' 
+        ? await fetchChannelsByCountry(selectedCountry.code, refresh)
+        : await fetchRadioStations(selectedCountry.code, refresh);
+      setChannels(data);
+      if (data.length > 0 && !currentChannel) setCurrentChannel(data[0]);
+    } catch (err) {
+      setChannels([]);
+    } finally { setLoadingChannels(false); }
   };
 
-  useEffect(() => { loadContent(); }, [selectedCountry, mode]);
+  useEffect(() => { if (isAppReady) loadContent(); }, [selectedCountry, mode, isAppReady]);
 
-  const handleCountrySelect = (country: Country) => { setSelectedCountry(country); setSidebarOpen(false); };
-  const handleModeChange = (newMode: 'tv' | 'radio') => { if (mode !== newMode) { setMode(newMode); setSidebarOpen(false); } };
-  const handleChannelSelect = (channel: Channel) => { setCurrentChannel(channel); window.scrollTo({ top: 0, behavior: 'smooth' }); };
-  const toggleFavorite = (channel: Channel) => {
-      setFavorites(prev => {
-          const exists = prev.some(c => c.id === channel.id);
-          if (exists) return prev.filter(c => c.id !== channel.id);
-          return [...prev, { ...channel, type: channel.type || mode }];
-      });
-  };
-  const isFavorite = (channel: Channel | null) => !!channel && favorites.some(c => c.id === channel.id);
-  const handleAddReminder = (channel: Channel, time: string) => {
-    setReminders(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), channelId: channel.id, channelName: channel.name, timeStr: time, created: Date.now() }]);
-    alert(`已设置提醒: ${channel.name} @ ${time}`);
-  };
-  const handleDeleteReminder = (id: string) => setReminders(prev => prev.filter(r => r.id !== id));
-  const handlePlayFromSchedule = (channelId: string) => {
-      let channel = channels.find(c => c.id === channelId) || favorites.find(c => c.id === channelId);
-      if (channel) { setCurrentChannel(channel); setActiveReminder(null); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-      else alert("无法在当前列表中找到该频道，请先切换到对应的国家或模式。");
-  };
-  const handleImportM3U = (content: string) => {
-      try {
-          const parsed = parseM3U(content);
-          setCustomChannels(parsed.map(c => ({...c, type: 'tv' as const})));
-          if (!countries.find(c => c.code === 'CUSTOM')) setCountries(prev => [CUSTOM_COUNTRY, ...prev]);
-          setSelectedCountry(CUSTOM_COUNTRY);
-          alert(`成功导入 ${parsed.length} 个频道`);
-      } catch (e) { alert("解析文件失败"); }
+  const handleChannelSelect = (channel: Channel) => {
+    setCurrentChannel(channel);
+    setHistory(prev => [channel, ...prev.filter(c => c.id !== channel.id)].slice(0, 10));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  if (!isAppReady || !currentTheme) return <div className="flex h-screen w-full items-center justify-center bg-black text-white">Loading...</div>;
+  const handleRandomSkip = () => {
+    if (channels.length > 0) handleChannelSelect(channels[Math.floor(Math.random() * channels.length)]);
+  };
+
+  if (!isAppReady) return (
+    <div className="h-screen w-full bg-[#050508] flex flex-col items-center justify-center">
+      <div className="w-12 h-12 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin mb-4"></div>
+      <div className="text-cyan-500 font-mono text-xs animate-pulse tracking-[0.3em] uppercase">初始化信号中...</div>
+    </div>
+  );
+
+  const { styles } = currentTheme;
 
   return (
-    <div className={`flex h-screen ${currentTheme.styles.bgMain} ${currentTheme.styles.bgPattern} ${currentTheme.styles.font} overflow-hidden transition-colors duration-500 relative`}>
-      {/* GLOBAL NOISE TEXTURE */}
+    <div className={`flex h-screen w-full ${styles.bgMain} ${styles.font} overflow-hidden relative`}>
       <div className="bg-noise"></div>
 
       <Sidebar 
-        countries={countries}
-        selectedCountry={selectedCountry}
-        onSelectCountry={handleCountrySelect}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        mode={mode}
-        onModeChange={handleModeChange}
-        themes={THEMES}
-        currentTheme={currentTheme}
-        onThemeChange={setCurrentTheme}
-        favorites={favorites}
-        onSelectFavorite={handleChannelSelect}
-        onImportM3U={handleImportM3U}
-        settings={settings}
-        onToggleSound={() => setSettings(prev => ({ ...prev, enableSound: !prev.enableSound }))}
-        reminders={reminders}
-        onDeleteReminder={handleDeleteReminder}
-        onPlayReminder={handlePlayFromSchedule}
+        countries={countries} selectedCountry={selectedCountry} onSelectCountry={setSelectedCountry}
+        isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} mode={mode} onModeChange={setMode}
+        themes={THEMES} currentTheme={currentTheme} onThemeChange={setCurrentTheme}
+        favorites={favorites} onSelectFavorite={handleChannelSelect} history={history}
+        onImportM3U={() => {}} settings={{enableSound: true}} onToggleSound={() => {}} reminders={[]}
+        onDeleteReminder={() => {}} onPlayReminder={() => {}}
       />
 
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative z-10">
-        <header className={`md:hidden ${currentTheme.styles.bgSidebar} border-b ${currentTheme.styles.border} p-4 flex items-center justify-between shrink-0 z-30`}>
-            <button onClick={() => setSidebarOpen(true)} className={currentTheme.styles.textMain}><Menu className="w-6 h-6" /></button>
-            <h1 className={`text-lg font-bold ${currentTheme.styles.textMain}`}>全球实时看和听</h1>
-            <div className="flex items-center gap-2">
-                <button onClick={() => setShowSchedule(true)} className={currentTheme.styles.textMain}><CalendarClock className="w-5 h-5" /></button>
-                <button onClick={() => loadContent(true)} className={currentTheme.styles.textMain}><RefreshCw className={`w-5 h-5 ${loadingChannels ? 'animate-spin' : ''}`} /></button>
+      <main className="flex-1 flex flex-col h-full min-w-0 z-10 relative">
+        <header className={`shrink-0 px-6 py-3 flex items-center justify-between border-b ${styles.border} ${styles.bgSidebar} backdrop-blur-3xl z-20`}>
+            <div className="flex items-center gap-4">
+                <button onClick={() => setSidebarOpen(true)} className={`md:hidden p-2 rounded-xl ${styles.textMain}`}><Menu className="w-6 h-6" /></button>
+                <div className="flex items-center gap-2">
+                    <span className="text-2xl">{selectedCountry?.flag}</span>
+                    <h1 className={`text-lg font-black uppercase italic tracking-tighter ${styles.textMain}`}>{selectedCountry?.name}</h1>
+                </div>
+            </div>
+            <div className="flex items-center gap-4">
+                <div className={`hidden sm:flex items-center gap-2 ${styles.card} px-3 py-1.5 ${styles.layoutShape} text-[10px]`}>
+                    <div className="w-1.5 h-1.5 rounded-full animate-pulse bg-cyan-500"></div>
+                    <span className={`font-mono ${styles.textMain}`}>{localTime}</span>
+                </div>
+                <button onClick={() => loadContent(true)} className={`p-2 rounded-full ${styles.textMain} ${loadingChannels ? 'animate-spin' : ''}`}>
+                    <RefreshCw className="w-4 h-4" />
+                </button>
             </div>
         </header>
 
         <div className={`flex-1 overflow-y-auto ${currentTheme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'}`}>
-            <div className={`w-full relative py-6 px-4 md:px-8 shadow-2xl ${currentTheme.type === 'glass' ? 'bg-black/30' : 'bg-black/10'} border-b ${currentTheme.styles.border}`}>
-                <div 
-                    className="absolute inset-0 opacity-30 pointer-events-none transition-colors duration-1000 blur-3xl animate-pulse-glow"
-                    style={{ background: `radial-gradient(circle at center, ${currentTheme.styles.accentColor} 0%, transparent 70%)` }}
-                ></div>
+            <div className="px-4 md:px-6 py-6 max-w-[1600px] mx-auto">
+                <div className="flex flex-col lg:flex-row gap-6">
+                    
+                    {/* 左侧主展示区 (约 70% 宽度) */}
+                    <div className="flex-1 min-w-0 space-y-6">
+                        <section className="space-y-4">
+                            <VideoPlayer 
+                              channel={currentChannel} country={selectedCountry} theme={currentTheme}
+                              isFavorite={!!currentChannel && favorites.some(f => f.id === currentChannel.id)}
+                              onToggleFavorite={() => {}} onAutoSkip={handleRandomSkip}
+                            />
+                            <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={handleChannelSelect} theme={currentTheme} mode={mode} />
+                        </section>
 
-                <div className="max-w-[1600px] mx-auto relative z-10">
-                    <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center gap-3">
-                            <div className={`p-2.5 rounded-xl ${currentTheme.styles.card} backdrop-blur-md shadow-lg border-0`}>
-                                <Tv className={`w-6 h-6 ${currentTheme.styles.textMain}`} />
+                        <section className="pt-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-1 h-5 bg-cyan-500 rounded-full"></div>
+                                    <h2 className={`text-lg font-black uppercase italic tracking-tight ${styles.textMain}`}>频道资源目录 ({channels.length})</h2>
+                                </div>
                             </div>
-                            <div>
-                                <h2 className={`text-3xl font-black tracking-tight bg-gradient-to-r from-white via-white/80 to-white/50 bg-clip-text text-transparent ${currentTheme.type === 'web95' ? 'text-black bg-none' : ''} ${currentTheme.type === 'kids' ? '!text-[#5D4037] !bg-none' : ''}`}>
-                                    {selectedCountry ? selectedCountry.name : '全球看听'}
-                                </h2>
-                                <p className={`text-xs font-bold uppercase tracking-widest ${currentTheme.styles.textDim} mt-1 flex items-center gap-1`}>
-                                    <Sparkles className="w-3 h-3" /> {channels.length} 信号源在线
-                                </p>
+                            <ChannelGrid 
+                                channels={channels} currentChannel={currentChannel} 
+                                onSelectChannel={handleChannelSelect} loading={loadingChannels}
+                                mode={mode} theme={currentTheme} favorites={favorites} onToggleFavorite={() => {}}
+                            />
+                        </section>
+                    </div>
+
+                    {/* 右侧功能挂件区 (约 30% 宽度) */}
+                    <div className="lg:w-[320px] shrink-0 space-y-4">
+                        <div className="lg:sticky lg:top-4 space-y-4">
+                            <div className={`${styles.card} p-5 ${styles.layoutShape}`}>
+                                <h3 className="text-[9px] font-black uppercase tracking-[0.2em] mb-4 opacity-40 flex items-center gap-2">
+                                    <History className="w-3 h-3" /> 播放足迹 (最近10条)
+                                </h3>
+                                <div className="space-y-2">
+                                    {history.map(h => (
+                                        <div key={h.id} onClick={() => handleChannelSelect(h)} className={`flex items-center gap-3 p-2 hover:bg-white/5 cursor-pointer rounded-xl group transition-all border border-transparent hover:border-white/5`}>
+                                            <div className="w-8 h-8 rounded-lg bg-black/30 flex items-center justify-center shrink-0 border border-white/5 overflow-hidden">
+                                                {h.logo ? <img src={h.logo} className="w-full h-full object-contain" /> : <Tv className="w-3.5 h-3.5 opacity-20" />}
+                                            </div>
+                                            <span className={`text-[10px] font-bold uppercase truncate ${styles.textMain}`}>{h.name}</span>
+                                        </div>
+                                    ))}
+                                    {history.length === 0 && <p className="text-[10px] opacity-20 italic text-center py-4">收视记录空空如也</p>}
+                                </div>
                             </div>
-                        </div>
-                        <div className="hidden md:flex gap-2">
-                            <button onClick={() => setShowSchedule(true)} className={`px-4 py-2 ${currentTheme.styles.button} ${currentTheme.styles.layoutShape} text-sm flex items-center gap-2 font-medium`}><CalendarClock className="w-4 h-4" /> 节目表</button>
-                            <button onClick={() => loadContent(true)} className={`px-4 py-2 ${currentTheme.styles.button} ${currentTheme.styles.layoutShape} text-sm flex items-center gap-2 font-medium`}><RefreshCw className={`w-4 h-4 ${loadingChannels ? 'animate-spin' : ''}`} /> 刷新</button>
+                            
+                            <button onClick={handleRandomSkip} className={`w-full py-4 ${styles.buttonPrimary} ${styles.layoutShape} font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xl`}>
+                                <Shuffle className="w-3.5 h-3.5" /> 随机跳台漫游
+                            </button>
+
+                            {/* AI 智播助手已整合到此，紧跟随机漫游 */}
+                            <AiChatPet theme={currentTheme} currentChannels={channels} onSelectChannel={handleChannelSelect} />
                         </div>
                     </div>
 
-                    <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={handleChannelSelect} theme={currentTheme} mode={mode} />
-
-                    {/* MARKER FOR INTERSECTION OBSERVER */}
-                    <div ref={playerMarkerRef} className="w-full h-1"></div>
-
-                    {/* VIDEO PLAYER CONTAINER - PREVENT LAYOUT SHIFT */}
-                    <div className="mt-4 min-h-[300px] md:min-h-[450px] relative">
-                        <VideoPlayer 
-                            channel={currentChannel} 
-                            country={selectedCountry} 
-                            autoPlay={true} 
-                            isRadio={mode === 'radio'} 
-                            theme={currentTheme} 
-                            isFavorite={isFavorite(currentChannel)} 
-                            onToggleFavorite={() => currentChannel && toggleFavorite(currentChannel)} 
-                            onAddReminder={handleAddReminder} 
-                            settings={settings} 
-                            isSticky={isSticky}
-                            onCloseSticky={() => setStickyEnabled(false)}
-                        />
-                    </div>
                 </div>
-            </div>
-
-            <div className="max-w-[1600px] mx-auto p-4 md:p-8">
-                <div className="flex items-center gap-3 mb-6 px-1">
-                    <div className={`w-1.5 h-8 ${currentTheme.type === 'cyber' ? 'bg-green-500' : currentTheme.styles.buttonPrimary} rounded-full shadow-lg shadow-current opacity-80`}></div>
-                    <h3 className={`text-xl font-bold ${currentTheme.styles.textMain}`}>频道导视</h3>
-                </div>
-                
-                <ChannelGrid channels={channels} currentChannel={currentChannel} onSelectChannel={handleChannelSelect} loading={loadingChannels} mode={mode} theme={currentTheme} favorites={favorites} onToggleFavorite={toggleFavorite} />
             </div>
         </div>
       </main>
-
-      <ScheduleList reminders={reminders} isOpen={showSchedule} onClose={() => setShowSchedule(false)} onDelete={handleDeleteReminder} theme={currentTheme} onPlayChannel={handlePlayFromSchedule} allChannels={[...channels, ...favorites]} />
-      <AlarmModal reminder={activeReminder} onClose={() => setActiveReminder(null)} onWatch={handlePlayFromSchedule} theme={currentTheme} />
-      <AiChatPet theme={currentTheme} />
     </div>
   );
 };

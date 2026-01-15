@@ -33,16 +33,16 @@ export interface ThemeStyles {
   buttonPrimary: string;
   input: string;
   font: string;
-  accentColor: string; // Hex for inline styles
+  accentColor: string;
   layoutShape: string;
   shadow: string;
-  bgPattern?: string; // NEW: Decorative background class
+  bgPattern?: string;
 }
 
 export interface AppTheme {
   id: string;
   name: string;
-  type: 'default' | 'web95' | 'kids' | 'acid' | 'glass' | 'cartoon';
+  type: 'default' | 'web95' | 'kids' | 'acid' | 'glass' | 'cartoon' | 'senior' | 'zen';
   styles: ThemeStyles;
 }
 
@@ -50,7 +50,7 @@ export interface Reminder {
   id: string;
   channelId: string;
   channelName: string;
-  timeStr: string; // HH:mm format
+  timeStr: string;
   created: number;
 }
 

@@ -1,647 +1,361 @@
+
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
-import { AlertCircle, Play, RefreshCw, Radio, Music, Square, Star, Captions, StopCircle, Volume2, VolumeX, Maximize, AlarmClock, Check, Clock, X } from 'lucide-react';
+import { Play, RefreshCw, Square, Star, Volume2, VolumeX, Maximize, Clock, Zap, Circle, AlertTriangle, Shuffle, WifiOff, Globe, ShieldAlert, Camera } from 'lucide-react';
 import { AppTheme, Channel, Country } from '../types';
-import { getTimezone } from '../services/iptvService';
 
 interface VideoPlayerProps {
   channel: Channel | null;
   country: Country | null; 
-  autoPlay?: boolean;
-  isRadio?: boolean;
   theme: AppTheme;
   isFavorite: boolean;
   onToggleFavorite: () => void;
-  onAddReminder: (channel: Channel, time: string) => void;
-  settings?: { enableSound: boolean };
-  isSticky?: boolean;
-  onCloseSticky?: () => void;
+  onAutoSkip?: () => void; // 自动跳台回调
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
-    channel, 
-    country,
-    autoPlay = true, 
-    isRadio = false, 
-    theme,
-    isFavorite,
-    onToggleFavorite,
-    onAddReminder,
-    settings = { enableSound: true },
-    isSticky = false,
-    onCloseSticky
+    channel, country, theme, isFavorite, onToggleFavorite, onAutoSkip
 }) => {
-  const { styles } = theme;
-  
-  // Dual Video Engine State
   const [activePlayerIndex, setActivePlayerIndex] = useState(0);
   const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
   const hlsRefs = useRef<(Hls | null)[]>([null, null]);
-
-  // General State
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  
+  const [loading, setLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  
-  // Volume State
-  const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
-  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [errorState, setErrorState] = useState<'none' | 'timeout' | 'fatal' | 'network'>('none');
+  const [errorDetail, setErrorDetail] = useState<string>('');
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES = 5; 
   
-  // Recording State
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
 
-  // Features State
-  const [signalStrength, setSignalStrength] = useState<number>(0); 
-  const [showTranslate, setShowTranslate] = useState(false);
-  const [currentTimeStr, setCurrentTimeStr] = useState('');
-  
-  // Alarm State
-  const [showAlarmPicker, setShowAlarmPicker] = useState(false);
-  const [alarmTime, setAlarmTime] = useState('');
+  const loadTimeoutRef = useRef<number | null>(null);
 
-  // Audio Context for Tick Sound
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
-  // Helper: Play Tick Sound
-  const playTick = useCallback(() => {
-      if (!settings.enableSound) return;
-      try {
-          if (!audioCtxRef.current) {
-              audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-          }
-          const ctx = audioCtxRef.current;
-          if (ctx.state === 'suspended') ctx.resume();
-          
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          
-          osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
-          osc.type = 'sine';
-          
-          gain.gain.setValueAtTime(0.05, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
-          
-          osc.start();
-          osc.stop(ctx.currentTime + 0.06);
-      } catch (e) {
-          // Ignore audio errors
+  // 核心清理函数：停止所有视频和流
+  const killAllPlayers = useCallback(() => {
+    videoRefs.forEach(ref => {
+      if (ref.current) {
+        ref.current.pause();
+        ref.current.removeAttribute('src');
+        ref.current.load(); // 强制清除缓存
       }
-  }, [settings.enableSound]);
+    });
+    hlsRefs.current.forEach((hls, idx) => {
+      if (hls) {
+        hls.destroy();
+        hlsRefs.current[idx] = null;
+      }
+    });
+  }, []);
 
-  // Update Clock based on country
+  const resetState = () => {
+    setErrorState('none');
+    setErrorDetail('');
+    setLoading(true);
+    retryCountRef.current = 0;
+    if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+  };
+
   useEffect(() => {
-    if (!country && !channel) return;
-    const tz = country ? getTimezone(country.code) : 'UTC';
+    videoRefs.forEach(ref => {
+      if (ref.current) {
+        ref.current.volume = volume;
+      }
+    });
+  }, [volume]);
 
-    const updateTime = () => {
-        try {
-            const now = new Date();
-            const timeString = new Intl.DateTimeFormat('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false,
-                timeZone: tz
-            }).format(now);
-            setCurrentTimeStr(timeString);
-        } catch (e) {
-            setCurrentTimeStr(new Date().toLocaleTimeString('en-GB'));
-        }
-    };
-
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, [country, channel]);
-
-  // Volume Sync
-  useEffect(() => {
-      videoRefs.forEach(ref => {
-          if (ref.current) {
-              ref.current.volume = volume;
-              ref.current.muted = isMuted;
-          }
-      });
-  }, [volume, isMuted]);
-
-  // --- DUAL ENGINE LOADING LOGIC ---
   useEffect(() => {
     const url = channel?.url;
+    if (!url) return;
+
+    if (isRecording) stopRecording();
     
-    if (!url) {
-        setLoading(false); 
-        setSignalStrength(0);
-        setIsPlaying(false);
-        return;
-    }
+    // 1. 立即停止当前所有声音和播放
+    killAllPlayers();
+    resetState();
 
     const nextIndex = (activePlayerIndex + 1) % 2;
     const nextVideo = videoRefs[nextIndex].current;
-    const currentVideo = videoRefs[activePlayerIndex].current;
-
     if (!nextVideo) return;
 
-    if (isRecording) handleStopRecording();
-
-    setSignalStrength(1); 
-    setShowTranslate(false);
-    setError(null);
-    if (!currentVideo || currentVideo.paused || currentVideo.ended) {
-        setLoading(true);
-    }
-    
-    setShowAlarmPicker(false);
-
-    if (hlsRefs.current[nextIndex]) {
-        hlsRefs.current[nextIndex]?.destroy();
-        hlsRefs.current[nextIndex] = null;
-    }
-
-    const isHlsSource = url.includes('.m3u8');
-    let hls: Hls | null = null;
-
-    const onReadyToSwitch = () => {
-        playTick(); 
-        setActivePlayerIndex(nextIndex);
-        setIsPlaying(true);
-        setLoading(false);
-        setSignalStrength(4);
-
-        if (autoPlay) {
-            nextVideo.play().catch(e => console.log("Autoplay prevented", e));
+    loadTimeoutRef.current = window.setTimeout(() => {
+        if (loading || !isPlaying) {
+            setErrorState('timeout');
+            setLoading(false);
         }
+    }, 20000);
 
-        setTimeout(() => {
-            if (currentVideo) {
-                currentVideo.pause();
-                currentVideo.removeAttribute('src');
-                currentVideo.load(); 
-            }
-            if (hlsRefs.current[activePlayerIndex]) {
-                hlsRefs.current[activePlayerIndex]?.destroy();
-                hlsRefs.current[activePlayerIndex] = null;
-            }
-        }, 500); 
-    };
-
-    const onError = (e: any) => {
-        // Improve error logging
-        const msg = e instanceof Event ? (e.type === 'error' ? 'Network/Format Error' : e.type) : e;
-        console.warn("Stream Error:", msg);
-        
-        if (activePlayerIndex !== nextIndex) {
-             setActivePlayerIndex(nextIndex);
-        }
-        setError(isRadio ? "电台无法连接" : "直播流无法播放");
-        setLoading(false);
-        setSignalStrength(0);
-    };
-
-    const cleanupListeners = () => {
-        nextVideo.removeEventListener('error', onError);
-        nextVideo.removeEventListener('canplay', onReadyToSwitch);
-    };
-
-    nextVideo.addEventListener('error', onError);
-    nextVideo.addEventListener('canplay', onReadyToSwitch);
-
-    if (isHlsSource && Hls.isSupported()) {
-      hls = new Hls({
+    if (url.includes('.m3u8') && Hls.isSupported()) {
+      const hls = new Hls({
+        maxBufferLength: 30,
         enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 90,
+        xhrSetup: (xhr) => {
+          xhr.withCredentials = false;
+        }
       });
       hlsRefs.current[nextIndex] = hls;
-
+      
       hls.loadSource(url);
       hls.attachMedia(nextVideo);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-         if (autoPlay) nextVideo.play().catch(() => {});
+        if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+        
+        // 确保其他播放器完全静音并停止
+        videoRefs.forEach((ref, idx) => {
+          if (idx !== nextIndex && ref.current) {
+            ref.current.pause();
+          }
+        });
+
+        nextVideo.play().catch(() => {
+            setIsPlaying(false);
+        });
+        
+        setLoading(false);
+        setIsPlaying(true);
+        setErrorState('none');
+        setActivePlayerIndex(nextIndex);
+        retryCountRef.current = 0;
       });
 
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              hls?.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls?.recoverMediaError();
-              break;
-            default:
-              onError(data);
-              hls?.destroy();
-              break;
-          }
+            if (retryCountRef.current < MAX_RETRIES) {
+                retryCountRef.current++;
+                const backoff = Math.pow(2, retryCountRef.current) * 500;
+                setTimeout(() => {
+                  if (!hlsRefs.current[nextIndex]) return;
+                  if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+                  else hls.recoverMediaError();
+                }, backoff);
+            } else {
+                setErrorState(data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'network' : 'fatal');
+                setErrorDetail(data.details || '');
+                setLoading(false);
+                if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+            }
         }
       });
     } else {
       nextVideo.src = url;
-      nextVideo.load();
+      nextVideo.oncanplay = () => {
+        if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+        nextVideo.play().catch(() => { setIsPlaying(false); });
+        setLoading(false);
+        setIsPlaying(true);
+        setErrorState('none');
+        setActivePlayerIndex(nextIndex);
+      };
+      nextVideo.onerror = () => {
+        setErrorState('network');
+        setErrorDetail('Native video source failure');
+        setLoading(false);
+      };
     }
 
     return () => {
-        cleanupListeners();
+        if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+        // 如果频道切换太快，确保在下一次 effect 前清理
     };
+  }, [channel?.url]);
 
-  }, [channel?.url, channel?.id]);
+  // 组件卸载时销毁一切
+  useEffect(() => {
+    return () => killAllPlayers();
+  }, [killAllPlayers]);
 
-  const togglePlay = () => {
+  const takeScreenshot = () => {
     const video = videoRefs[activePlayerIndex].current;
-    if (!video) return;
-    if (isPlaying) {
-      video.pause();
-      setIsPlaying(false);
-    } else {
-      video.play();
-      setIsPlaying(true);
-    }
-  };
-
-  const handleStartRecording = () => {
-    const video = videoRefs[activePlayerIndex].current;
-    if (!video) return;
-
+    if (!video || errorState !== 'none' || loading) return;
     try {
-        const stream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream ? (video as any).mozCaptureStream() : null;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `Live_Snap_${channel?.name || 'Unknown'}_${new Date().getTime()}.png`;
+      link.click();
+    } catch (err) { console.error('截图失败:', err); }
+  };
 
-        if (!stream) {
-            alert("您的浏览器不支持直接录制此媒体流。");
-            return;
-        }
+  const startRecording = () => {
+    const video = videoRefs[activePlayerIndex].current;
+    if (!video || errorState !== 'none') return;
+    try {
+      const stream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream ? (video as any).mozCaptureStream() : null;
+      if (!stream) return;
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9,opus' });
+      mediaRecorderRef.current = recorder;
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Live_Record_${channel?.name}_${new Date().getTime()}.webm`;
+        a.click();
+      };
+      recorder.start();
+      setIsRecording(true);
+      setRecordingDuration(0);
+      recordingTimerRef.current = window.setInterval(() => setRecordingDuration(p => p + 1), 1000);
+    } catch (err) {}
+  };
 
-        const mimeType = MediaRecorder.isTypeSupported('video/webm; codecs=vp9') 
-            ? 'video/webm; codecs=vp9' 
-            : 'video/webm';
-
-        const mediaRecorder = new MediaRecorder(stream, { mimeType });
-        mediaRecorderRef.current = mediaRecorder;
-        chunksRef.current = [];
-
-        mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-                chunksRef.current.push(e.data);
-            }
-        };
-
-        mediaRecorder.onstop = async () => {
-            const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const filename = `${channel?.name || 'recording'}-${timestamp}.webm`;
-            
-            setIsRecording(false);
-
-            // @ts-ignore
-            if (window.showSaveFilePicker) {
-                try {
-                    // @ts-ignore
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: filename,
-                        types: [{
-                            description: 'WebM Video',
-                            accept: { 'video/webm': ['.webm'] },
-                        }],
-                    });
-                    // @ts-ignore
-                    const writable = await handle.createWritable();
-                    await writable.write(blob);
-                    await writable.close();
-                    return;
-                } catch (err) {
-                    if ((err as Error).name === 'AbortError') return;
-                    console.warn("Save picker failed, fallback to download");
-                }
-            }
-
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            document.body.appendChild(a);
-            a.style.display = 'none';
-            a.href = url;
-            a.download = filename;
-            a.click();
-            window.URL.revokeObjectURL(url);
-            a.remove();
-        };
-
-        mediaRecorder.start();
-        setIsRecording(true);
-    } catch (e) {
-        console.error("Recording failed:", e);
-        alert("无法录制。可能是由于版权保护(CORS)或浏览器限制。");
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     }
   };
 
-  const handleStopRecording = () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop();
+  const { styles } = theme;
+  const getErrorDisplay = () => {
+      if (errorDetail === 'manifestLoadError') {
+          return {
+              icon: <ShieldAlert className="w-12 h-12 text-rose-500" />,
+              title: 'CORS 或 资源下线',
+              desc: '直播服务器拒绝了连接请求。这通常是因为源地址已关闭或跨域限制。'
+          };
       }
+      if (errorState === 'network') {
+          return {
+              icon: <WifiOff className="w-12 h-12 text-amber-500" />,
+              title: '主干节点响应失败',
+              desc: '无法建立与目标服务器的有效握手。请检查本地网络连接。'
+          };
+      }
+      if (errorState === 'timeout') {
+          return {
+              icon: <Clock className="w-12 h-12 text-cyan-500 animate-pulse" />,
+              title: '信号握手超时',
+              desc: '服务器响应时间过长。该信道目前可能发生拥堵。'
+          };
+      }
+      return {
+          icon: <AlertTriangle className="w-12 h-12 text-red-500" />,
+          title: '频率信号丢失',
+          desc: '该频率当前无法接收到有效载波。'
+      };
   };
 
-  const handleSaveReminder = () => {
-      if (!alarmTime || !channel) return;
-      onAddReminder(channel, alarmTime);
-      setShowAlarmPicker(false);
-      setAlarmTime('');
-  };
-
-  if (!channel) {
-    return (
-      <div className={`w-full aspect-video flex flex-col items-center justify-center ${styles.card} ${styles.layoutShape} border-dashed opacity-70`}>
-        {isRadio ? <Radio className={`w-16 h-16 mb-4 ${styles.textDim}`} /> : <TvIcon className={`w-16 h-16 mb-4 ${styles.textDim}`} />}
-        <p className={styles.textDim}>请从列表中选择一个{isRadio ? '电台' : '频道'}</p>
-      </div>
-    );
-  }
+  const display = getErrorDisplay();
 
   return (
-    <div className={`w-full space-y-4 transition-all duration-300 ${isSticky ? 'fixed bottom-4 right-4 w-[320px] sm:w-[360px] z-[100]' : ''}`}>
-      {isSticky && onCloseSticky && (
-          <button 
-              onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseSticky();
-              }}
-              className="absolute -top-3 -right-3 z-[110] bg-black text-white rounded-full p-1 shadow-lg hover:bg-red-500 transition-colors"
-          >
-              <X className="w-4 h-4" />
-          </button>
-      )}
+    <div className="relative w-full group select-none">
+      <div className="absolute inset-0 -m-8 bg-cyan-500/5 blur-[100px] opacity-0 group-hover:opacity-100 transition-opacity duration-1000 pointer-events-none"></div>
 
-      <div className={`
-        relative w-full aspect-video ${styles.layoutShape} overflow-hidden shadow-2xl group 
-        ${styles.border} ${theme.type === 'web95' ? 'bg-black' : styles.bgSidebar}
-        ${isSticky ? 'shadow-[0_0_30px_rgba(0,0,0,0.5)] ring-2 ring-white/10' : ''}
-      `}>
+      <div className={`relative w-full aspect-video bg-[#0a0a0a] rounded-3xl overflow-hidden border ${styles.border} shadow-[0_30px_100px_rgba(0,0,0,0.8)]`}>
         
-        {theme.type === 'web95' && (
-             <div className="absolute top-0 left-0 right-0 h-8 bg-[#000080] flex items-center justify-between px-2 z-20 select-none">
-                 <span className="text-white font-bold text-xs">Media Player - {channel.name}</span>
-                 <div className="flex gap-1">
-                     <div className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">_</div>
-                     <div className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">□</div>
-                     <div className="bg-[#c0c0c0] w-4 h-4 text-[10px] text-black border border-white border-b-black border-r-black flex items-center justify-center">×</div>
-                 </div>
-             </div>
+        {errorState !== 'none' && (
+            <div className="absolute inset-0 z-40 flex flex-col items-center justify-center text-center p-10 bg-black/90 backdrop-blur-2xl">
+                <div className="relative z-10 flex flex-col items-center space-y-6 animate-in fade-in zoom-in slide-in-from-bottom-4 duration-700">
+                    <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center border border-white/10 shadow-[0_0_60px_rgba(244,63,94,0.1)] group/icon relative">
+                        {display.icon}
+                        <div className="absolute -inset-4 rounded-full border border-white/5 animate-pulse opacity-20"></div>
+                    </div>
+                    <div>
+                        <h3 className="text-white font-black text-3xl uppercase italic tracking-tighter">{display.title}</h3>
+                        <p className="text-gray-400 text-xs mt-4 max-w-sm mx-auto leading-relaxed font-bold opacity-80">{display.desc}</p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-4 pt-6">
+                        <button onClick={() => window.location.reload()} className="px-10 py-4 bg-white text-black text-[11px] font-black uppercase rounded-full hover:bg-cyan-400 transition-all shadow-2xl active:scale-95 flex items-center justify-center gap-2">
+                            <RefreshCw className="w-3.5 h-3.5" /> 强制重连信道
+                        </button>
+                        <button onClick={onAutoSkip} className="px-10 py-4 bg-white/5 text-white text-[11px] font-black uppercase rounded-full border border-white/10 hover:bg-white/10 transition-all flex items-center justify-center gap-2 active:scale-95">
+                            <Shuffle className="w-3.5 h-3.5" /> 尝试其他频率
+                        </button>
+                    </div>
+                </div>
+            </div>
         )}
 
-        {/* DUAL VIDEO PLAYERS - Removed crossOrigin to fix stream errors */}
         {[0, 1].map((index) => (
             <video
-                key={index}
-                ref={videoRefs[index]}
-                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ${isRadio ? 'opacity-0' : ''}`}
-                style={{ 
-                    opacity: activePlayerIndex === index && !isRadio ? 1 : 0,
-                    paddingTop: theme.type === 'web95' ? '32px' : '0',
-                    zIndex: activePlayerIndex === index ? 1 : 0
-                }}
-                playsInline
+                key={index} ref={videoRefs[index]} playsInline muted={isMuted}
+                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-1000 ${activePlayerIndex === index && errorState === 'none' ? 'opacity-100' : 'opacity-0'}`}
             />
         ))}
 
-        {isRadio && (
-            <div className={`absolute inset-0 flex items-center justify-center pointer-events-none ${styles.bgSidebar} z-10`}>
-                <div className="relative">
-                    {isPlaying && (
-                        <div className={`absolute inset-0 ${styles.buttonPrimary} blur-3xl opacity-20 animate-pulse rounded-full`}></div>
-                    )}
-                    <div className={`relative z-10 w-32 h-32 rounded-full ${styles.card} flex items-center justify-center`}>
-                        {channel.logo ? (
-                            <img src={channel.logo} alt={channel.name} className="w-24 h-24 rounded-full object-cover" />
-                        ) : (
-                            <Music className={`w-12 h-12 ${styles.textMain}`} />
-                        )}
-                    </div>
-                </div>
-            </div>
-        )}
-
-        {loading && (
-             <div className={`absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm`}>
-                <div className="flex items-center gap-2">
-                    <RefreshCw className={`w-8 h-8 ${styles.textMain} animate-spin`} />
-                    <span className={styles.textMain}>Connecting...</span>
-                </div>
-             </div>
-        )}
-
-        {showTranslate && (
-            <div className="absolute bottom-20 left-0 right-0 px-8 text-center z-20 pointer-events-none">
-                <div className={`bg-black/70 text-white px-4 py-2 rounded-lg inline-block backdrop-blur-sm`}>
-                    <p className="text-lg font-medium leading-relaxed">
-                        [实时翻译功能已开启] <br/>
-                        <span className="text-sm text-slate-400 italic">正在监听音频流...</span>
-                    </p>
-                </div>
-            </div>
-        )}
-
-        {error && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/90 backdrop-blur-sm">
-            <AlertCircle className="w-12 h-12 text-red-500 mb-3" />
-            <p className="text-white font-medium">{error}</p>
-            <button 
-              onClick={() => {
-                  setLoading(true);
-                  setError(null);
-                  const currentHls = hlsRefs.current[activePlayerIndex];
-                  const currentVid = videoRefs[activePlayerIndex].current;
-                  if(currentHls) currentHls.startLoad();
-                  else if(currentVid) currentVid.load();
-              }}
-              className={`mt-4 px-4 py-2 ${styles.layoutShape} ${styles.buttonPrimary} flex items-center gap-2`}
-            >
-              <RefreshCw className="w-4 h-4" /> 重试
-            </button>
+        {isRecording && errorState === 'none' && (
+          <div className="absolute top-6 left-6 z-40 flex items-center gap-3 bg-black/60 backdrop-blur-xl px-4 py-2 rounded-full border border-red-500/30">
+             <div className="w-2.5 h-2.5 bg-red-600 rounded-full animate-pulse shadow-[0_0_15px_rgba(220,38,38,1)]"></div>
+             <span className="text-white text-[10px] font-black tracking-widest uppercase">REC</span>
+             <span className="text-red-400 font-mono text-xs font-bold border-l border-white/10 pl-3">
+                 {Math.floor(recordingDuration/60).toString().padStart(2,'0')}:{(recordingDuration%60).toString().padStart(2,'0')}
+             </span>
           </div>
         )}
 
-        <div className={`
-             absolute inset-0 z-20 flex flex-col justify-between p-4 transition-opacity duration-300
-             ${theme.type === 'web95' ? 'opacity-100 pointer-events-none' : 'opacity-0 group-hover:opacity-100 bg-gradient-to-t from-black/80 via-transparent to-black/40'}
-        `}>
-            <div className={`flex justify-between items-start pointer-events-auto ${theme.type === 'web95' ? 'mt-8' : ''}`}>
-                 <div className="bg-red-600 px-2 py-1 rounded text-xs font-bold text-white border border-white/10 animate-pulse">
-                    LIVE
-                 </div>
-                 
-                 {isRecording && (
-                    <div className="flex items-center gap-2 bg-red-500/20 border border-red-500/50 px-3 py-1 rounded-full animate-pulse">
-                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                        <span className="text-xs font-bold text-red-400">REC</span>
-                    </div>
-                 )}
-            </div>
+        {loading && errorState === 'none' && (
+             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md z-20 space-y-4">
+                <div className="relative w-16 h-16 animate-pulse">
+                    <div className="absolute inset-0 border-4 border-cyan-500/20 rounded-full"></div>
+                    <div className="absolute inset-0 border-4 border-t-cyan-500 rounded-full animate-spin"></div>
+                </div>
+                <div className="text-[10px] text-cyan-500 font-mono font-black uppercase tracking-[0.3em]">同步信号中...</div>
+             </div>
+        )}
 
-            <div className={`flex items-center gap-4 pointer-events-auto ${theme.type === 'web95' ? 'bg-[#c0c0c0] p-2 border-2 border-t-white border-l-white border-r-black border-b-black' : ''}`}>
-                <button 
-                    onClick={togglePlay}
-                    className={`w-10 h-10 ${styles.layoutShape} flex items-center justify-center transition-all ${styles.buttonPrimary}`}
-                >
-                    {isPlaying ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-                </button>
-
-                <div 
-                    className="flex items-center gap-2 group/vol relative"
-                    onMouseEnter={() => setShowVolumeSlider(true)}
-                    onMouseLeave={() => setShowVolumeSlider(false)}
-                >
-                    <button 
-                        onClick={() => setIsMuted(!isMuted)}
-                        className={`w-8 h-8 ${styles.layoutShape} flex items-center justify-center transition-colors ${styles.button}`}
-                    >
-                        {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        <div className={`absolute inset-x-0 bottom-0 p-8 bg-gradient-to-t from-black via-black/60 to-transparent transition-all duration-700 ${errorState !== 'none' ? 'opacity-20 pointer-events-none translate-y-4' : 'opacity-0 group-hover:opacity-100'}`}>
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-6">
+                    <button onClick={() => {
+                        const v = videoRefs[activePlayerIndex].current;
+                        if (isPlaying) v?.pause(); else v?.play();
+                        setIsPlaying(!isPlaying);
+                    }} className="w-14 h-14 bg-white text-black rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 shadow-2xl">
+                        {isPlaying ? <Square className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-1" />}
                     </button>
-                    
-                    <div className={`overflow-hidden transition-all duration-300 ${showVolumeSlider ? 'w-24 opacity-100' : 'w-0 opacity-0'}`}>
-                        <input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.05"
-                            value={isMuted ? 0 : volume}
-                            onChange={(e) => {
-                                setVolume(parseFloat(e.target.value));
-                                if (parseFloat(e.target.value) > 0) setIsMuted(false);
-                            }}
-                            className={`w-20 h-1 rounded-lg appearance-none cursor-pointer ${theme.type === 'web95' ? 'bg-black border border-white' : 'bg-white/20'}`}
-                        />
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="px-2 py-0.5 bg-cyan-500 text-[9px] font-black text-black rounded-sm uppercase tracking-tighter">LIVE</span>
+                            <h4 className="text-white font-black text-lg tracking-tight truncate max-w-[150px] md:max-w-md uppercase italic">
+                                {channel?.name || '等待选台中...'}
+                            </h4>
+                        </div>
+                        <div className="flex items-center gap-2 text-gray-500 text-[10px] font-bold uppercase tracking-widest">
+                            <Zap className="w-3 h-3 text-cyan-400 fill-current" /> 
+                            {channel?.group || '全球通用信道'} • {country?.name || '未知地域'}
+                        </div>
                     </div>
                 </div>
 
-                <div className="flex-1"></div>
-
-                <div className="flex items-center gap-2 relative">
-                    <div className="relative">
-                        <button
-                            onClick={() => setShowAlarmPicker(!showAlarmPicker)}
-                            className={`p-2 ${styles.layoutShape} transition-all ${showAlarmPicker ? styles.buttonActive : styles.button}`}
-                            title="设置提醒/闹钟"
-                        >
-                            <AlarmClock className="w-4 h-4" />
-                        </button>
-                        
-                        {showAlarmPicker && (
-                            <div className={`absolute bottom-full mb-3 right-0 ${styles.card} p-3 ${styles.layoutShape} shadow-xl w-56 z-50`}>
-                                <h4 className={`text-xs font-bold ${styles.textMain} mb-2`}>添加提醒</h4>
-                                <div className="flex gap-2">
-                                    <input 
-                                        type="time" 
-                                        className={`flex-1 px-2 py-1 text-sm focus:outline-none ${styles.input} ${styles.layoutShape}`}
-                                        value={alarmTime}
-                                        onChange={(e) => setAlarmTime(e.target.value)}
-                                    />
-                                    <button 
-                                        onClick={handleSaveReminder}
-                                        className={`${styles.buttonPrimary} p-1 rounded hover:opacity-90`}
-                                        disabled={!alarmTime}
-                                    >
-                                        <Check className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+                <div className="flex items-center gap-3">
+                    <button onClick={takeScreenshot} className={`p-3.5 bg-white/10 text-white hover:bg-white/20 rounded-xl transition-all active:scale-90`} title="拍摄快照">
+                        <Camera className="w-5 h-5" />
+                    </button>
+                    <button onClick={isRecording ? stopRecording : startRecording} className={`p-3.5 rounded-xl transition-all ${isRecording ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)]' : 'bg-white/10 text-white hover:bg-white/20'}`} title={isRecording ? "停止录制" : "开始录制"}>
+                        <Circle className={`w-5 h-5 ${isRecording ? 'fill-current animate-pulse' : ''}`} />
+                    </button>
+                    <div className="flex items-center group/vol">
+                      <button onClick={() => setIsMuted(!isMuted)} className="p-3.5 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors">
+                          {isMuted || volume === 0 ? <VolumeX className="w-5 h-5 text-red-400" /> : <Volume2 className="w-5 h-5" />}
+                      </button>
+                      <div className="w-0 overflow-hidden group-hover/vol:w-28 group-hover/vol:ml-3 transition-all duration-500 flex items-center">
+                          <input type="range" min="0" max="1" step="0.01" value={isMuted ? 0 : volume} onChange={(e) => { const v = parseFloat(e.target.value); setVolume(v); if (v > 0) setIsMuted(false); }} className="w-24 h-1.5 accent-cyan-500 bg-white/20 rounded-full appearance-none cursor-pointer" />
+                      </div>
                     </div>
-
-                    <button
-                        onClick={() => setShowTranslate(!showTranslate)}
-                        className={`p-2 ${styles.layoutShape} transition-all ${showTranslate ? styles.buttonActive : styles.button}`}
-                        title="实时翻译字幕"
-                    >
-                        <Captions className="w-4 h-4" />
-                    </button>
-
-                    <button
-                        onClick={isRecording ? handleStopRecording : handleStartRecording}
-                        className={`p-2 ${styles.layoutShape} transition-all flex items-center gap-2 ${
-                            isRecording 
-                            ? 'bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]' 
-                            : styles.button
-                        }`}
-                        title={isRecording ? "停止录制" : "开始录制"}
-                    >
-                         {isRecording ? <StopCircle className="w-4 h-4" /> : <div className="w-4 h-4 rounded-full border-2 border-current flex items-center justify-center"><div className="w-2 h-2 bg-current rounded-full"></div></div>}
-                    </button>
-
-                    <button 
-                        onClick={() => {
-                           if (document.fullscreenElement) document.exitFullscreen();
-                           else videoRefs[activePlayerIndex].current?.parentElement?.requestFullscreen();
-                        }}
-                        className={`p-2 ${styles.layoutShape} ${styles.button}`}
-                    >
-                        <Maximize className="w-4 h-4" />
+                    <button onClick={() => videoRefs[activePlayerIndex].current?.requestFullscreen()} className="p-3.5 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-colors">
+                        <Maximize className="w-5 h-5" />
                     </button>
                 </div>
             </div>
         </div>
       </div>
-
-      {!isSticky && (
-          <div className="flex items-start justify-between px-2">
-            <div className="flex items-center gap-3 overflow-hidden">
-                <div className={`w-10 h-10 ${styles.layoutShape} ${styles.bgSidebar} border ${styles.border} p-1.5 shrink-0`}>
-                    {channel.logo ? (
-                        <img src={channel.logo} alt="logo" className="w-full h-full object-contain" />
-                    ) : (
-                        isRadio ? <Radio className={`w-full h-full ${styles.textDim}`} /> : <TvIcon className={`w-full h-full ${styles.textDim}`} />
-                    )}
-                </div>
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                        <h3 className={`font-bold text-lg ${styles.textMain} truncate`}>{channel.name}</h3>
-                        
-                        <div className="flex items-end gap-0.5 h-4 w-6 ml-1" title={`Signal: ${signalStrength}/4`}>
-                            {[1,2,3,4].map(bar => (
-                                <div 
-                                    key={bar} 
-                                    className={`flex-1 rounded-sm transition-all duration-500 ${
-                                        signalStrength >= bar 
-                                            ? (signalStrength < 3 ? 'bg-yellow-500' : 'bg-green-500') 
-                                            : 'bg-white/10'
-                                    }`}
-                                    style={{ height: `${bar * 25}%` }}
-                                />
-                            ))}
-                        </div>
-
-                        {/* Local Time Display */}
-                        <div className={`flex items-center gap-1 ml-3 px-2 py-0.5 ${styles.card} ${styles.layoutShape} text-xs ${styles.textDim} border ${styles.border}`}>
-                            <Clock className="w-3 h-3" />
-                            <span className="font-mono">{currentTimeStr}</span>
-                        </div>
-                    </div>
-                    
-                    <p className={`text-sm ${styles.textDim} truncate opacity-80`}>
-                        {isRadio ? '正在广播' : '正在直播'} • {channel.group || 'General'}
-                    </p>
-                </div>
-            </div>
-
-            <button 
-                onClick={onToggleFavorite}
-                className={`p-2.5 ${styles.layoutShape} border transition-all ${
-                    isFavorite 
-                    ? 'bg-yellow-500/10 border-yellow-500/50 text-yellow-500' 
-                    : `${styles.button} ${styles.border}`
-                }`}
-            >
-                <Star className={`w-5 h-5 ${isFavorite ? 'fill-yellow-500' : ''}`} />
-            </button>
-          </div>
-      )}
     </div>
   );
 };
-
-const TvIcon = ({className}: {className?: string}) => (
-    <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="15" x="2" y="7" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
-);

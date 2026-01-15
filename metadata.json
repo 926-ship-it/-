@@ -1,5 +1,7 @@
 {
-  "name": "全球实时看和听",
-  "description": "A modern web application to watch live television channels from around the world, organized by country and region.",
-  "requestFramePermissions": []
+  "name": "全球实时看和听 2.0",
+  "description": "基于 AI 驱动的全球实时电视与广播流媒体聚合平台，支持智能搜索、多主题切换及跨设备投屏。",
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }

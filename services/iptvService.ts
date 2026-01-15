@@ -1,120 +1,78 @@
+
 import { Country, Channel } from '../types';
 
 const API_BASE = 'https://iptv-org.github.io/api';
 const PLAYLIST_BASE = 'https://iptv-org.github.io/iptv/countries';
 const RADIO_API_BASE = 'https://de1.api.radio-browser.info/json/stations/bycountrycodeexact';
 
-// Basic mapping for major countries to represent timezones
-const TIMEZONE_MAP: Record<string, string> = {
-  'CN': 'Asia/Shanghai',
-  'US': 'America/New_York',
-  'JP': 'Asia/Tokyo',
-  'GB': 'Europe/London',
-  'KR': 'Asia/Seoul',
-  'RU': 'Europe/Moscow',
-  'FR': 'Europe/Paris',
-  'DE': 'Europe/Berlin',
-  'BR': 'America/Sao_Paulo',
-  'IN': 'Asia/Kolkata',
-  'AU': 'Australia/Sydney',
-  'CA': 'America/Toronto',
-  'MX': 'America/Mexico_City',
-  'ID': 'Asia/Jakarta',
-  'TR': 'Europe/Istanbul',
-  'SA': 'Asia/Riyadh',
-  'IT': 'Europe/Rome',
-  'ES': 'Europe/Madrid',
-  'TH': 'Asia/Bangkok',
-  'VN': 'Asia/Ho_Chi_Minh',
-  'TW': 'Asia/Taipei',
-  'HK': 'Asia/Hong_Kong',
-  'SG': 'Asia/Singapore',
-};
+// 排除受限地区
+const EXCLUDED_REGIONS = ['CN', 'HK', 'TW'];
 
-// Hardcoded channels to ensure the user ALWAYS sees content, especially the ones they asked for
-const FALLBACK_CHANNELS: Record<string, Channel[]> = {
-    'US': [
-        { id: 'nasa', name: 'NASA TV', logo: 'https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg', url: 'https://ntv1.akamaized.net/hls/live/2013975/NASA-NTV1-HLS/master.m3u8', group: 'Science', type: 'tv' },
-        { id: '30a-tv', name: '30A TV Classic Movies', logo: 'https://i.imgur.com/7j2yKxX.png', url: 'https://30a-tv.com/feeds/30atv.m3u8', group: 'Movies', type: 'tv' },
-        { id: '30a-music', name: '30A Music', logo: 'https://i.imgur.com/7j2yKxX.png', url: 'https://30a-tv.com/feeds/30amusic.m3u8', group: 'Music', type: 'tv' },
-        { id: 'abc-news', name: 'ABC News Live', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/ABC_News_Logo.svg/1200px-ABC_News_Logo.svg.png', url: 'https://content.uplynk.com/channel/3324f2467c414329b3b0cc5cd987b6be.m3u8', group: 'News', type: 'tv' },
-        { id: 'redbull', name: 'Red Bull TV', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/f/f5/RedBullTVLogo.svg/1200px-RedBullTVLogo.svg.png', url: 'https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8', group: 'Sports', type: 'tv' },
-        { id: 'classic-arts', name: 'Classic Arts Showcase', logo: 'https://www.classicartsshowcase.org/wp-content/uploads/2016/09/CAS_Logo_White.png', url: 'https://jplayer.classicartsshowcase.org/hls/live.m3u8', group: 'Culture', type: 'tv' },
-        { id: 'bloomberg', name: 'Bloomberg TV', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Bloomberg_Television_logo.svg/1200px-Bloomberg_Television_logo.svg.png', url: 'https://liveproduction.global.ssl.fastly.net/us/playlist.m3u8', group: 'News', type: 'tv' },
-        { id: 'fashion-tv', name: 'Fashion TV', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/FashionTV_logo.svg/2560px-FashionTV_logo.svg.png', url: 'https://fash1043.cloudycdn.services/slive/_definst_/ftv_ftv_midnite_secret_k1y_27049_midnitesecret_1080p/chunklist.m3u8', group: 'Lifestyle', type: 'tv' },
-        { id: 'nhk-world', name: 'NHK World', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/NHK_World_Logo.svg/1200px-NHK_World_Logo.svg.png', url: 'https://nhkworld.webcdn.stream.ne.jp/www11/nhkworld-tv/global/2003458/live.m3u8', group: 'News', type: 'tv' },
-        { id: 'ted', name: 'TED', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/TED_wordmark.svg/1200px-TED_wordmark.svg.png', url: 'https://ted-fastly.amagi.tv/playlist.m3u8', group: 'Education', type: 'tv' },
-        { id: 'rakuten-action', name: 'Rakuten Action Movies', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/43/Rakuten_TV_logo.svg/1200px-Rakuten_TV_logo.svg.png', url: 'https://rakuten-actionmovies-1-fr.samsung.wurl.com/manifest/playlist.m3u8', group: 'Movies', type: 'tv' },
-    ],
-    'GB': [
-       { id: 'itv3', name: 'ITV3', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e8/ITV3_logo_2013.svg/1200px-ITV3_logo_2013.svg.png', url: '', group: 'Entertainment', type: 'tv' },
-       { id: 'itv4', name: 'ITV4', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/9/9b/ITV4_logo_2013.svg/1200px-ITV4_logo_2013.svg.png', url: '', group: 'Entertainment', type: 'tv' },
-    ],
-    'CN': [
-        { id: 'cctv1', name: 'CCTV-1', logo: 'https://live.fanmingming.com/tv/CCTV1.png', url: 'http://39.134.115.163:8080/PLTV/88888910/224/3221225618/index.m3u8', group: 'CCTV', type: 'tv' },
-        { id: 'cctv6', name: 'CCTV-6 电影', logo: 'https://live.fanmingming.com/tv/CCTV6.png', url: 'http://39.134.115.163:8080/PLTV/88888910/224/3221225623/index.m3u8', group: 'CCTV', type: 'tv' },
-        { id: 'cctv13', name: 'CCTV-13 新闻', logo: 'https://live.fanmingming.com/tv/CCTV13.png', url: 'http://39.134.115.163:8080/PLTV/88888910/224/3221225630/index.m3u8', group: 'CCTV', type: 'tv' },
-        { id: 'hunan', name: '湖南卫视', logo: 'https://live.fanmingming.com/tv/hunan.png', url: 'http://39.134.115.163:8080/PLTV/88888910/224/3221225672/index.m3u8', group: 'Satellite', type: 'tv' },
-        { id: 'zhejiang', name: '浙江卫视', logo: 'https://live.fanmingming.com/tv/zhejiang.png', url: 'http://39.134.115.163:8080/PLTV/88888910/224/3221225668/index.m3u8', group: 'Satellite', type: 'tv' },
-    ]
-};
+// 全球顶级信道兜底库 (始终可用)
+const UNIVERSAL_CHANNELS: Channel[] = [
+    { id: 'nasa-tv', name: 'NASA TV (全球)', logo: 'https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg', url: 'https://ntv1.akamaized.net/hls/live/2013975/NASA-NTV1-HLS/master.m3u8', group: 'Science', type: 'tv' },
+    { id: 'nhk-world', name: 'NHK World-Japan', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/NHK_World_Logo.svg/1200px-NHK_World_Logo.svg.png', url: 'https://nhkworld.webcdn.stream.ne.jp/www11/nhkworld-tv/global/2003458/live.m3u8', group: 'News', type: 'tv' },
+    { id: 'abc-news-us', name: 'ABC News Live', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/ABC_News_Logo.svg/1200px-ABC_News_Logo.svg.png', url: 'https://content.uplynk.com/channel/3324f2467c414329b3b0cc5cd987b6be.m3u8', group: 'News', type: 'tv' },
+    { id: 'bloomberg-tv', name: 'Bloomberg Global', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Bloomberg_Television_logo.svg/1200px-Bloomberg_Television_logo.svg.png', url: 'https://liveproduction.global.ssl.fastly.net/us/playlist.m3u8', group: 'Business', type: 'tv' },
+    { id: 'redbull-tv', name: 'Red Bull TV Sports', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/f/f5/RedBullTVLogo.svg/1200px-RedBullTVLogo.svg.png', url: 'https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8', group: 'Sports', type: 'tv' },
+    { id: 'france-24', name: 'France 24 English', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/20/France_24_Logo.svg/1200px-France_24_Logo.svg.png', url: 'https://static.france24.com/live/F24_EN_LO_HLS/live_web.m3u8', group: 'News', type: 'tv' },
+    { id: 'dw-news', name: 'DW News Global', logo: 'https://upload.wikimedia.org/wikipedia/commons/d/d1/Deutsche_Welle_logo.svg', url: 'https://dwamdstream102.akamaized.net/hls/live/2015430/dwstream102/index.m3u8', group: 'News', type: 'tv' },
+    { id: 'al-jazeera', name: 'Al Jazeera English', logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/f/f2/Al_jazeera_logo.svg/1200px-Al_jazeera_logo.svg.png', url: 'https://live-hls-web-aje.akamaized.net/aje/index.m3u8', group: 'News', type: 'tv' }
+];
+
+// 兜底国家列表 (如果 API 挂了也能显示)
+const FALLBACK_COUNTRIES: Country[] = [
+    { name: '全球信道 (推荐)', code: 'GLOBAL', languages: ['en'], flag: '🌐' },
+    { name: '美国', code: 'US', languages: ['en'], flag: '🇺🇸' },
+    { name: '英国', code: 'GB', languages: ['en'], flag: '🇬🇧' },
+    { name: '日本', code: 'JP', languages: ['ja'], flag: '🇯🇵' },
+    { name: '韩国', code: 'KR', languages: ['ko'], flag: '🇰🇷' },
+    { name: '法国', code: 'FR', languages: ['fr'], flag: '🇫🇷' },
+    { name: '德国', code: 'DE', languages: ['de'], flag: '🇩🇪' },
+];
 
 export const getTimezone = (countryCode: string): string => {
-  return TIMEZONE_MAP[countryCode] || 'UTC';
+  const map: Record<string, string> = { 'US': 'America/New_York', 'JP': 'Asia/Tokyo', 'GB': 'Europe/London', 'KR': 'Asia/Seoul' };
+  return map[countryCode] || 'UTC';
 };
 
 export const fetchCountries = async (): Promise<Country[]> => {
   try {
     const response = await fetch(`${API_BASE}/countries.json`);
-    if (!response.ok) throw new Error('Failed to fetch countries');
+    if (!response.ok) return FALLBACK_COUNTRIES;
     const data = await response.json();
-    return data.sort((a: Country, b: Country) => a.name.localeCompare(b.name));
+    const filtered = data
+        .filter((c: Country) => !EXCLUDED_REGIONS.includes(c.code))
+        .sort((a: Country, b: Country) => a.name.localeCompare(b.name));
+    return [{ name: '全球信道 (推荐)', code: 'GLOBAL', languages: ['en'], flag: '🌐' }, ...filtered];
   } catch (error) {
-    // console.debug("Error fetching countries:", error);
-    return [];
+    return FALLBACK_COUNTRIES;
   }
 };
 
 export const fetchChannelsByCountry = async (countryCode: string, refresh = false): Promise<Channel[]> => {
+  if (countryCode === 'GLOBAL' || countryCode === 'FAVORITES') {
+      return UNIVERSAL_CHANNELS;
+  }
+  
   try {
-    const cacheBuster = refresh ? `?t=${Date.now()}` : '';
-    const response = await fetch(`${PLAYLIST_BASE}/${countryCode.toLowerCase()}.m3u${cacheBuster}`);
-    
-    if (!response.ok) {
-        // Check fallback
-        if (FALLBACK_CHANNELS[countryCode]) {
-            return FALLBACK_CHANNELS[countryCode];
-        }
-        return [];
-    }
+    const response = await fetch(`${PLAYLIST_BASE}/${countryCode.toLowerCase()}.m3u${refresh ? `?t=${Date.now()}` : ''}`);
+    if (!response.ok) return UNIVERSAL_CHANNELS;
     
     const text = await response.text();
     const channels = parseM3U(text);
-    
-    if (channels.length === 0 && FALLBACK_CHANNELS[countryCode]) {
-        return FALLBACK_CHANNELS[countryCode];
-    }
-    
-    return channels.map(c => ({ ...c, type: 'tv' }));
+    return channels.length > 0 ? channels.map(c => ({ ...c, type: 'tv' })) : UNIVERSAL_CHANNELS;
   } catch (error) {
-    // Network error fallback
-    if (FALLBACK_CHANNELS[countryCode]) {
-        return FALLBACK_CHANNELS[countryCode];
-    }
-    return [];
+    return UNIVERSAL_CHANNELS;
   }
 };
 
 export const fetchRadioStations = async (countryCode: string, refresh = false): Promise<Channel[]> => {
+  if (countryCode === 'GLOBAL') return [];
   try {
-    // Fetch top 500 stations for the country
-    const url = `${RADIO_API_BASE}/${countryCode}${refresh ? '?hidebroken=true&limit=500' : ''}`;
-    const response = await fetch(url);
+    const response = await fetch(`${RADIO_API_BASE}/${countryCode}`);
     if (!response.ok) return [];
-    
     const data = await response.json();
-    
-    // Map Radio Browser format to our Channel interface
     return data.map((station: any) => ({
       id: station.stationuuid,
       name: station.name.trim(),
@@ -123,63 +81,27 @@ export const fetchRadioStations = async (countryCode: string, refresh = false): 
       group: station.tags || 'Radio',
       type: 'radio' as const
     }));
-  } catch (error) {
-    // console.debug(`Error fetching radio stations for ${countryCode}`, error);
-    return [];
-  }
+  } catch (error) { return []; }
 };
 
 export const parseM3U = (content: string): Channel[] => {
   const lines = content.split('\n');
   const channels: Channel[] = [];
-  
   let currentChannel: Partial<Channel> = {};
 
   for (let line of lines) {
     line = line.trim();
-    if (!line) continue;
-
     if (line.startsWith('#EXTINF:')) {
-      const infoPart = line.substring(8);
-      const commaIndex = infoPart.lastIndexOf(',');
-      const displayName = infoPart.substring(commaIndex + 1).trim();
-      
-      const logoMatch = infoPart.match(/tvg-logo="([^"]*)"/);
-      const groupMatch = infoPart.match(/group-title="([^"]*)"/);
-      
-      // Generate a deterministic ID based on the name to help with favorites/persistence
-      let hash = 0;
-      for (let i = 0; i < displayName.length; i++) {
-        hash = ((hash << 5) - hash) + displayName.charCodeAt(i);
-        hash |= 0;
-      }
-      const id = `ch-${Math.abs(hash)}`;
-
-      currentChannel = {
-        name: displayName,
-        logo: logoMatch ? logoMatch[1] : null,
-        group: groupMatch ? groupMatch[1] : 'Uncategorized',
-        id: id
-      };
-    } else if (!line.startsWith('#')) {
+      const displayName = line.substring(line.lastIndexOf(',') + 1).trim();
+      const logoMatch = line.match(/tvg-logo="([^"]*)"/);
+      const groupMatch = line.match(/group-title="([^"]*)"/);
+      currentChannel = { name: displayName, logo: logoMatch ? logoMatch[1] : null, group: groupMatch ? groupMatch[1] : 'Uncategorized' };
+    } else if (line && !line.startsWith('#')) {
       if (currentChannel.name) {
-        // Update ID to include URL hash for uniqueness
-        let hash = 0;
-        const combo = currentChannel.name + line;
-        for (let i = 0; i < combo.length; i++) {
-           hash = ((hash << 5) - hash) + combo.charCodeAt(i);
-           hash |= 0;
-        }
-        
-        channels.push({
-          ...currentChannel as Channel,
-          id: `ch-${Math.abs(hash)}`,
-          url: line
-        });
+        channels.push({ ...currentChannel as Channel, id: `ch-${Math.random().toString(36).substr(2, 9)}`, url: line });
         currentChannel = {};
       }
     }
   }
-
   return channels;
 };
