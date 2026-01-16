@@ -1,16 +1,41 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { AppTheme, PetType, ChatMessage, Channel } from '../types';
+import { AppTheme, PetType, ChatMessage, Channel, Language } from '../types';
 import { MessageCircle, X, Send, Bot, Cat, Dog, Rabbit, Sparkles, Wand2 } from 'lucide-react';
 
 interface AiChatPetProps {
   theme: AppTheme;
   currentChannels: Channel[];
   onSelectChannel: (channel: Channel) => void;
+  lang: Language;
 }
 
-export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, onSelectChannel }) => {
+const TRANSLATIONS = {
+  zh: {
+    title: '智能陪聊伙伴',
+    changePartner: '更换伙伴',
+    choosePartner: '挑选一名聊天伙伴',
+    partnerDesc: '它们会陪你聊天，并根据你的心情推荐频道',
+    placeholder: '聊聊你想看的频道或心情...',
+    recommend: '纠结看什么？点我推荐！',
+    recommendPrompt: '有什么好频道推荐吗？',
+    cat: '小猫', dog: '小狗', bunny: '兔子', robot: '机器人',
+    fallback: '嗯... 正在为你搜索合适的信号源...'
+  },
+  en: {
+    title: 'AI Companion',
+    changePartner: 'Change Partner',
+    choosePartner: 'Pick a Streaming Buddy',
+    partnerDesc: 'They will chat with you and help pick stations',
+    placeholder: 'Talk about channels or mood...',
+    recommend: 'Unsure what to watch? Ask me!',
+    recommendPrompt: 'Any channel recommendations?',
+    cat: 'Cat', dog: 'Dog', bunny: 'Bunny', robot: 'Assistant',
+    fallback: 'System searching frequencies... Hmm.'
+  }
+};
+
+export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, onSelectChannel, lang }) => {
   const [petType, setPetType] = useState<PetType>(() => (localStorage.getItem('ai_pet_type') as PetType) || null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
@@ -19,11 +44,11 @@ export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, on
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const { styles } = theme;
+  const t = TRANSLATIONS[lang];
 
   useEffect(() => { 
       if (petType) {
           localStorage.setItem('ai_pet_type', petType);
-          // 3秒后显示一个小小的邀请气泡
           const timer = setTimeout(() => setShowInvite(true), 3000);
           return () => clearTimeout(timer);
       }
@@ -43,20 +68,20 @@ export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, on
 
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        let systemInstruction = `你是一个虚拟电视伙伴 (${petType})。
-        当前可用频道列表: ${currentChannels.slice(0, 50).map(c => c.name).join(', ')}。
-        你的任务是陪用户聊天，并根据心情推荐频道。推荐时请用 [[频道名称]] 格式。
-        语气设定: ${petType === 'cat' ? '傲娇、偶尔挖苦、喜欢喵喵叫' : petType === 'dog' ? '极度热情、忠诚、喜欢汪汪叫' : petType === 'bunny' ? '害羞、温柔、说话简短' : '专业、高效的 AI'}。
-        回复必须使用中文，富有情感。`;
+        let systemInstruction = `You are a virtual TV companion (${petType}) responding in ${lang === 'zh' ? 'Chinese' : 'English'}.
+        Available channels: ${currentChannels.slice(0, 50).map(c => c.name).join(', ')}.
+        Task: Chat with user and recommend channels based on mood using [[Channel Name]] format.
+        Personality: ${petType === 'cat' ? '傲娇，爱吐槽，说话带点猫叫声' : petType === 'dog' ? '热情外向，忠诚，喜欢称呼用户为主人' : petType === 'bunny' ? '害羞腼腆，说话简短温柔' : '专业、客观的 AI 助手'}.`;
 
-        const chat = ai.chats.create({ 
-          model: 'gemini-3-flash-preview', 
-          config: { systemInstruction } 
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: userMsg.text,
+          config: { systemInstruction }
         });
-        const result = await chat.sendMessage({ message: userMsg.text });
-        const responseText = result.text;
-
+        
+        const responseText = response.text;
         const match = responseText?.match(/\[\[(.*?)\]\]/);
+        
         if (match) {
             const recommendedName = match[1];
             const channel = currentChannels.find(c => c.name.toLowerCase().includes(recommendedName.toLowerCase()));
@@ -64,7 +89,7 @@ export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, on
                 setMessages(prev => [...prev, {
                     id: Date.now().toString(),
                     role: 'model',
-                    text: responseText.replace(/\[\[.*?\]\]/g, channel.name) + " (已切换到该频道)"
+                    text: responseText.replace(/\[\[.*?\]\]/g, channel.name) + (lang === 'zh' ? " (已为你自动跳转频道)" : " (Switched to channel)")
                 }]);
                 onSelectChannel(channel);
                 setLoading(false);
@@ -72,16 +97,9 @@ export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, on
             }
         }
 
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: responseText || "我开小差了..." }]);
+        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: responseText || t.fallback }]);
     } catch (e) {
-        // 当连不上 Google（如无 VPN 环境）时的可爱降级逻辑
-        let fallbackText = "嗯。嗯...";
-        if (petType === 'cat') fallbackText = "喵？喵喵~ 喵呜。";
-        else if (petType === 'dog') fallbackText = "汪！汪汪！汪汪汪！";
-        else if (petType === 'bunny') fallbackText = "吱... 吱吱。";
-        else if (petType === 'robot') fallbackText = "嗯。系统正在搜索频率... 嗯。";
-
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: fallbackText }]);
+        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', text: t.fallback }]);
     } finally {
         setLoading(false);
     }
@@ -99,41 +117,38 @@ export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, on
 
   return (
     <div className={`flex flex-col ${styles.card} ${styles.layoutShape} h-[450px] overflow-hidden border ${styles.border} transition-all duration-500 relative`}>
-        {/* Proactive Invite Bubble */}
         {showInvite && !loading && (
-            <div onClick={() => handleSend("有什么推荐的频道吗？")} className="absolute top-[60px] left-4 right-4 z-20 bg-cyan-500 text-black p-3 rounded-2xl shadow-2xl cursor-pointer animate-in slide-in-from-top-4 duration-500 hover:scale-105 transition-transform">
+            <div onClick={() => handleSend(t.recommendPrompt)} className="absolute top-[60px] left-4 right-4 z-20 bg-cyan-500 text-black p-3 rounded-2xl shadow-2xl cursor-pointer animate-in slide-in-from-top-4 duration-500 hover:scale-105 transition-transform">
                 <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2"><Wand2 className="w-4 h-4" /> 不知道看什么？点我推荐！</span>
+                    <span className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2"><Wand2 className="w-4 h-4" /> {t.recommend}</span>
                 </div>
             </div>
         )}
 
-        {/* Header */}
         <div className={`p-4 flex items-center justify-between border-b ${styles.border} shrink-0 bg-black/10`}>
              <div className={`flex items-center gap-3 ${styles.textMain} font-black uppercase tracking-widest text-[10px]`}>
                  <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-                 <span>AI 陪聊助手</span>
+                 <span>{t.title}</span>
              </div>
              {petType && (
                  <button onClick={() => { setPetType(null); setMessages([]); }} className={`text-[9px] font-bold ${styles.textDim} hover:${styles.textMain} transition-colors uppercase`}>
-                     更换伙伴
+                     {t.changePartner}
                  </button>
              )}
         </div>
 
-        {/* Content Area */}
-        <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${theme.type === 'web95' ? 'bg-white' : ''} ${theme.type === 'web95' ? 'scrollbar-web95' : 'scrollbar-thin'}`} ref={scrollRef}>
+        <div className={`flex-1 overflow-y-auto p-4 space-y-4 ${theme.type === 'web95' ? 'bg-white' : ''} scrollbar-thin`} ref={scrollRef}>
             {!petType ? (
                 <div className="h-full flex flex-col items-center justify-center text-center space-y-6 animate-in fade-in duration-500">
                     <div className="space-y-2">
-                        <p className={`${styles.textMain} font-black text-xs uppercase tracking-tighter`}>挑选一名直播伙伴</p>
-                        <p className={`${styles.textDim} text-[9px] uppercase tracking-widest opacity-60`}>它们会陪你聊天并帮你选台</p>
+                        <p className={`${styles.textMain} font-black text-xs uppercase tracking-tighter`}>{t.choosePartner}</p>
+                        <p className={`${styles.textDim} text-[9px] uppercase tracking-widest opacity-60`}>{t.partnerDesc}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3 w-full max-w-[280px]">
                         {(['cat', 'dog', 'bunny', 'robot'] as const).map(type => (
-                            <button key={type} onClick={() => { setPetType(type); setMessages([{ id: 'init', role: 'model', text: `嘿！我是你的${type === 'cat' ? '喵星人' : type === 'dog' ? '汪星人' : type === 'bunny' ? '兔兔' : '助手'}。想看点什么？跟我说说心情，或者直接让我推荐吧！` }]); }} className={`flex flex-col items-center gap-2 p-4 ${styles.button} ${styles.layoutShape} border ${styles.border} transition-all hover:scale-105 active:scale-95 group`}>
+                            <button key={type} onClick={() => { setPetType(type); setMessages([{ id: 'init', role: 'model', text: lang === 'zh' ? `哈啰！我是你的${TRANSLATIONS.zh[type]}。今天想看点什么呢？` : `Hi! I'm your ${TRANSLATIONS.en[type]}. What to watch?` }]); }} className={`flex flex-col items-center gap-2 p-4 ${styles.button} ${styles.layoutShape} border ${styles.border} transition-all hover:scale-105 active:scale-95 group`}>
                                 {getPetIcon(type, "w-8 h-8 transition-transform group-hover:rotate-6")}
-                                <span className="text-[9px] font-black uppercase tracking-widest">{type === 'cat' ? '小猫' : type === 'dog' ? '小狗' : type === 'bunny' ? '兔子' : '助手'}</span>
+                                <span className="text-[9px] font-black uppercase tracking-widest">{t[type]}</span>
                             </button>
                         ))}
                     </div>
@@ -162,7 +177,6 @@ export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, on
             )}
         </div>
 
-        {/* Input Area */}
         {petType && (
             <div className={`p-4 border-t ${styles.border} flex items-center gap-2 bg-black/5 shrink-0`}>
                 <input 
@@ -170,7 +184,7 @@ export const AiChatPet: React.FC<AiChatPetProps> = ({ theme, currentChannels, on
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                    placeholder="跟伙伴聊聊频道或心情..."
+                    placeholder={t.placeholder}
                     className={`flex-1 ${styles.input} ${styles.layoutShape} px-4 py-2 text-[11px] focus:outline-none font-bold placeholder:opacity-40`}
                 />
                 <button onClick={() => handleSend()} disabled={!inputText.trim() || loading} className={`p-2.5 ${styles.layoutShape} ${styles.buttonPrimary} disabled:opacity-30 shadow-lg transition-all active:scale-90`}>

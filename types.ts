@@ -1,4 +1,6 @@
 
+export type Language = 'zh' | 'en';
+
 export interface Country {
   name: string;
   code: string;
@@ -13,11 +15,6 @@ export interface Channel {
   url: string;
   group?: string;
   type?: 'tv' | 'radio';
-}
-
-export interface ChannelCategory {
-  name: string;
-  channels: Channel[];
 }
 
 export interface ThemeStyles {
@@ -41,7 +38,7 @@ export interface ThemeStyles {
 
 export interface AppTheme {
   id: string;
-  name: string;
+  name: { zh: string; en: string };
   type: 'default' | 'web95' | 'kids' | 'acid' | 'glass' | 'cartoon' | 'senior' | 'zen';
   styles: ThemeStyles;
 }
