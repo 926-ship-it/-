@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { Country, AppTheme, Channel, AppSettings, Reminder, Language } from '../types';
-import { Search, Globe, X, Tv, Radio, Palette, Star, Upload, Settings, Check, Volume2, VolumeX } from 'lucide-react';
+import { Search, Globe, X, Tv, Radio, Palette, Star, Link, Settings, Check, Volume2, VolumeX } from 'lucide-react';
 
 interface SidebarProps {
   countries: Country[];
@@ -16,7 +16,7 @@ interface SidebarProps {
   onThemeChange: (theme: AppTheme) => void;
   favorites: Channel[];
   onSelectFavorite: (channel: Channel) => void;
-  onImportM3U: (content: string) => void;
+  onImportM3U: () => void;
   settings: AppSettings;
   onToggleSound: () => void;
   onOpenSettings: () => void;
@@ -53,7 +53,7 @@ const TRANSLATIONS = {
     scanPlaceholder: 'Region search...',
     network: 'Node',
     visuals: 'Visuals',
-    import: 'Import Link',
+    import: 'Import Source',
     uplinkActive: 'Link Active'
   }
 };
@@ -66,7 +66,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showThemes, setShowThemes] = useState(false);
   const [activeTab, setActiveTab] = useState<'favorites' | 'history' | null>('favorites');
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const t = TRANSLATIONS[lang];
   const { styles } = currentTheme;
@@ -225,17 +224,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                  </div>
             )}
 
-            <button onClick={() => fileInputRef.current?.click()} className={`w-full flex items-center justify-center gap-2.5 py-3.5 ${styles.layoutShape} border ${styles.border} ${styles.button} text-[9px] font-black uppercase tracking-widest transition-all hover:bg-white/5`}>
-                <Upload className="w-3.5 h-3.5" /> {t.import}
+            <button onClick={onImportM3U} className={`w-full flex items-center justify-center gap-2.5 py-3.5 ${styles.layoutShape} border ${styles.border} ${styles.button} text-[9px] font-black uppercase tracking-widest transition-all hover:bg-white/5`}>
+                <Link className="w-3.5 h-3.5" /> {t.import}
             </button>
-            <input type="file" accept=".m3u,.m3u8" ref={fileInputRef} className="hidden" onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) {
-                    const r = new FileReader();
-                    r.onload = (ev) => { if (ev.target?.result) onImportM3U(ev.target.result as string); };
-                    r.readAsText(f);
-                }
-            }} />
 
             <div className="flex gap-2">
                 <button onClick={() => setShowThemes(!showThemes)} className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-[9px] font-black uppercase ${styles.button} ${styles.border} ${styles.layoutShape} ${showThemes ? 'bg-white text-black border-white' : ''}`}>

@@ -1,7 +1,10 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
-import { Play, RefreshCw, Square, Star, Volume2, VolumeX, Maximize, Clock, Zap, Circle, AlertTriangle, Shuffle, WifiOff, Globe, ShieldAlert, Camera, Terminal } from 'lucide-react';
+import { 
+  Play, RefreshCw, Square, Star, Volume2, Volume1, VolumeX, 
+  Maximize, Globe, Camera, Circle, Download, CheckCircle2 
+} from 'lucide-react';
 import { AppTheme, Channel, Country, Language } from '../types';
 
 interface VideoPlayerProps {
@@ -10,333 +13,206 @@ interface VideoPlayerProps {
   theme: AppTheme;
   isFavorite: boolean;
   onToggleFavorite: () => void;
-  onAutoSkip?: () => void;
   lang: Language;
 }
 
-const TRANSLATIONS = {
-  zh: {
-    uplinkFailed: '信道握手失败',
-    uplinkFailedDesc: '无法锁定卫星波束，请尝试切换物理节点。',
-    signalTimeout: '接收超时',
-    signalTimeoutDesc: '远程载波响应缓慢，可能存在区域性干扰。',
-    frequencyLost: '载波丢失',
-    frequencyLostDesc: '当前坐标信号中断，正在重新搜寻频道列表。',
-    forceRelink: '强制对流',
-    jumpNode: '跳跃至随机节点',
-    recording: '正在写入存储',
-    syncing: '同步中...',
-    live: '实时传输',
-    searching: '扫描中...',
-    global: '公海信道',
-    public: '公共'
-  },
-  en: {
-    uplinkFailed: 'Handshake Failed',
-    uplinkFailedDesc: 'Unable to lock beam. Switch physical node.',
-    signalTimeout: 'Reception Timeout',
-    signalTimeoutDesc: 'Carrier response slow. Check interference.',
-    frequencyLost: 'Carrier Lost',
-    frequencyLostDesc: 'Coordinate signal lost. Rescanning catalog.',
-    forceRelink: 'Sync Now',
-    jumpNode: 'Quantum Jump',
-    recording: 'Writing Buffer',
-    syncing: 'Syncing...',
-    live: 'Real-time',
-    searching: 'Scanning...',
-    global: 'Global Link',
-    public: 'Public'
-  }
-};
-
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
-    channel, country, theme, isFavorite, onToggleFavorite, onAutoSkip, lang
+    channel, country, theme, isFavorite, onToggleFavorite, lang
 }) => {
-  const [activePlayerIndex, setActivePlayerIndex] = useState(0);
-  const videoRefs = [useRef<HTMLVideoElement>(null), useRef<HTMLVideoElement>(null)];
-  const hlsRefs = useRef<(Hls | null)[]>([null, null]);
-  
-  const [loading, setLoading] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [errorState, setErrorState] = useState<'none' | 'timeout' | 'fatal' | 'network'>('none');
-  const retryCountRef = useRef(0);
-  const MAX_RETRIES = 5; 
-  
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingDuration, setRecordingDuration] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const recordingTimerRef = useRef<number | null>(null);
-  const loadTimeoutRef = useRef<number | null>(null);
 
-  const t = TRANSLATIONS[lang];
+  const [loading, setLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [error, setError] = useState(false);
+  const [volume, setVolume] = useState(0.8);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [showToast, setShowToast] = useState<string | null>(null);
 
-  const killAllPlayers = useCallback(() => {
-    videoRefs.forEach(ref => {
-      if (ref.current) {
-        ref.current.pause();
-        ref.current.removeAttribute('src');
-        ref.current.load();
-      }
-    });
-    hlsRefs.current.forEach((hls, idx) => {
-      if (hls) {
-        hls.destroy();
-        hlsRefs.current[idx] = null;
-      }
-    });
-  }, []);
+  const t = {
+    zh: { 
+        sync: '同步中...', fail: '信号锁定失败', retry: '强制重连', live: 'LIVE',
+        shotSuccess: '截图已保存', recStart: '录制中', recStop: '已保存',
+        corsWarning: 'CORS 受限'
+    },
+    en: { 
+        sync: 'Syncing...', fail: 'Lock Failed', retry: 'Relink', live: 'LIVE',
+        shotSuccess: 'Saved', recStart: 'REC', recStop: 'Done',
+        corsWarning: 'CORS Protected'
+    }
+  }[lang];
 
-  const resetState = () => {
-    setErrorState('none');
-    setLoading(true);
-    retryCountRef.current = 0;
-    if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+  const triggerToast = (msg: string) => {
+    setShowToast(msg);
+    setTimeout(() => setShowToast(null), 3000);
   };
 
-  useEffect(() => {
-    videoRefs.forEach(ref => {
-      if (ref.current) ref.current.volume = volume;
-    });
-  }, [volume]);
+  const initPlayer = useCallback(() => {
+    if (!channel?.url || !videoRef.current) return;
+    
+    setError(false);
+    setLoading(true);
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
 
-  useEffect(() => {
-    const url = channel?.url;
-    if (!url) return;
-    if (isRecording) stopRecording();
-    killAllPlayers();
-    resetState();
-
-    const nextIndex = (activePlayerIndex + 1) % 2;
-    const nextVideo = videoRefs[nextIndex].current;
-    if (!nextVideo) return;
-
-    loadTimeoutRef.current = window.setTimeout(() => {
-        if (loading || !isPlaying) {
-            setErrorState('timeout');
-            setLoading(false);
-        }
-    }, 25000);
-
+    const url = channel.url;
     if (url.includes('.m3u8') && Hls.isSupported()) {
-      const hls = new Hls({
-        maxBufferLength: 30,
-        enableWorker: true,
-        xhrSetup: (xhr) => { xhr.withCredentials = false; }
-      });
-      hlsRefs.current[nextIndex] = hls;
-      hls.loadSource(url);
-      hls.attachMedia(nextVideo);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-        videoRefs.forEach((ref, idx) => { if (idx !== nextIndex && ref.current) ref.current.pause(); });
-        nextVideo.play().catch(() => { setIsPlaying(false); });
-        setLoading(false);
-        setIsPlaying(true);
-        setErrorState('none');
-        setActivePlayerIndex(nextIndex);
-        retryCountRef.current = 0;
-      });
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) {
-            if (retryCountRef.current < MAX_RETRIES) {
-                retryCountRef.current++;
-                setTimeout(() => {
-                  if (!hlsRefs.current[nextIndex]) return;
-                  if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-                  else hls.recoverMediaError();
-                }, Math.pow(2, retryCountRef.current) * 500);
-            } else {
-                setErrorState(data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'network' : 'fatal');
-                setLoading(false);
-                if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-            }
-        }
-      });
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: true, crossOrigin: true });
+        hlsRef.current = hls;
+        hls.loadSource(url);
+        hls.attachMedia(videoRef.current);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            setLoading(false);
+            videoRef.current?.play().catch(() => setIsPlaying(false));
+            setIsPlaying(true);
+        });
+        hls.on(Hls.Events.ERROR, (event, data) => { if (data.fatal) setError(true); });
     } else {
-      nextVideo.src = url;
-      nextVideo.oncanplay = () => {
-        if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
-        nextVideo.play().catch(() => { setIsPlaying(false); });
-        setLoading(false);
-        setIsPlaying(true);
-        setErrorState('none');
-        setActivePlayerIndex(nextIndex);
-      };
-      nextVideo.onerror = () => { setErrorState('network'); setLoading(false); };
+        videoRef.current.src = url;
+        videoRef.current.crossOrigin = "anonymous";
+        videoRef.current.oncanplay = () => { setLoading(false); videoRef.current?.play(); setIsPlaying(true); };
+        videoRef.current.onerror = () => setError(true);
     }
-    return () => { if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current); };
-  }, [channel?.url]);
+  }, [channel]);
 
-  useEffect(() => { return () => killAllPlayers(); }, [killAllPlayers]);
+  useEffect(() => { initPlayer(); }, [initPlayer]);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.volume = isMuted ? 0 : volume;
+  }, [volume, isMuted]);
 
   const takeScreenshot = () => {
-    const video = videoRefs[activePlayerIndex].current;
-    if (!video || errorState !== 'none' || loading) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const link = document.createElement('a');
-    link.href = canvas.toDataURL('image/png');
-    link.download = `Satellite_Capture_${channel?.name}_${Date.now()}.png`;
-    link.click();
-  };
-
-  const startRecording = () => {
-    const video = videoRefs[activePlayerIndex].current;
+    const video = videoRef.current;
     if (!video) return;
-    const stream = (video as any).captureStream ? (video as any).captureStream() : null;
-    if (!stream) return;
-    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-    mediaRecorderRef.current = recorder;
-    chunksRef.current = [];
-    recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
-    recorder.onstop = () => {
-        const url = URL.createObjectURL(new Blob(chunksRef.current, { type: 'video/webm' }));
-        const a = document.createElement('a'); a.href = url; a.download = `Rec_${channel?.name}.webm`; a.click();
-    };
-    recorder.start();
-    setIsRecording(true);
-    setRecordingDuration(0);
-    recordingTimerRef.current = window.setInterval(() => setRecordingDuration(p => p + 1), 1000);
+    try {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const link = document.createElement('a');
+        link.download = `Looq-${Date.now()}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        triggerToast(t.shotSuccess);
+    } catch (e) { triggerToast(t.corsWarning); }
   };
 
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setIsRecording(false);
-    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+  const toggleRecording = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (isRecording) {
+        mediaRecorderRef.current?.stop();
+        setIsRecording(false);
+    } else {
+        try {
+            const stream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream ? (video as any).mozCaptureStream() : null;
+            if (!stream) throw new Error();
+            const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            mediaRecorderRef.current = recorder;
+            chunksRef.current = [];
+            recorder.ondataavailable = (e) => chunksRef.current.push(e.data);
+            recorder.onstop = () => {
+                const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = `Looq-REC-${Date.now()}.webm`;
+                link.href = url;
+                link.click();
+                triggerToast(t.recStop);
+            };
+            recorder.start();
+            setIsRecording(true);
+            triggerToast(t.recStart);
+        } catch (e) { triggerToast(t.corsWarning); }
+    }
   };
 
   const { styles } = theme;
-  const getErrorDisplay = () => {
-      if (errorState === 'network') return { icon: <WifiOff className="w-16 h-16 text-amber-500 animate-pulse" />, title: t.uplinkFailed, desc: t.uplinkFailedDesc };
-      if (errorState === 'timeout') return { icon: <Clock className="w-16 h-16 text-cyan-400 animate-spin" />, title: t.signalTimeout, desc: t.signalTimeoutDesc };
-      return { icon: <AlertTriangle className="w-16 h-16 text-rose-500 animate-bounce" />, title: t.frequencyLost, desc: t.frequencyLostDesc };
-  };
-
-  const display = getErrorDisplay();
 
   return (
-    <div className="relative w-full group animate-in zoom-in duration-1000">
-      <div className={`relative w-full aspect-video bg-black ${styles.layoutShape} overflow-hidden border ${styles.border} shadow-[0_60px_150px_rgba(0,0,0,0.95)] transition-all duration-700 hover:border-white/20 animate-breathe`}>
+    <div className="relative w-full group overflow-hidden touch-manipulation">
+      <div className={`relative w-full aspect-video bg-black ${styles.layoutShape} overflow-hidden border ${styles.border} shadow-2xl`}>
+        <div className="absolute inset-0 pointer-events-none z-20 opacity-[0.03] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%]"></div>
         
-        <div className="absolute inset-0 bg-gradient-to-tr from-cyan-500/5 via-transparent to-purple-500/5 opacity-50 z-0"></div>
+        {isRecording && <div className="absolute top-4 right-4 z-50 flex items-center gap-1.5 bg-rose-500/20 backdrop-blur-md px-2 py-1 rounded-full border border-rose-500/50">
+            <div className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></div>
+            <span className="text-[8px] font-black text-rose-500 uppercase tracking-widest">REC</span>
+        </div>}
 
-        {errorState !== 'none' && (
-            <div className="absolute inset-0 z-40 flex flex-col items-center justify-center text-center p-12 bg-black/90 backdrop-blur-[60px]">
-                <div className="relative z-10 flex flex-col items-center space-y-10 animate-in fade-in zoom-in slide-in-from-bottom-12 duration-1000">
-                    <div className="w-32 h-32 rounded-full bg-white/5 flex items-center justify-center border border-white/10 shadow-[0_0_100px_rgba(255,255,255,0.08)] relative group">
-                        {display.icon}
-                        <div className="absolute -inset-10 rounded-full border border-white/5 animate-ping opacity-10"></div>
-                    </div>
-                    <div>
-                        <h3 className="text-white font-black text-5xl uppercase italic tracking-tighter mb-6 leading-tight">{display.title}</h3>
-                        <p className="text-white/40 text-[12px] max-w-sm mx-auto leading-relaxed font-bold uppercase tracking-[0.2em]">{display.desc}</p>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-6 pt-6">
-                        <button onClick={() => window.location.reload()} className="px-14 py-5 bg-white text-black text-[12px] font-black uppercase rounded-full hover:bg-cyan-400 transition-all active:scale-95 flex items-center gap-4 shadow-2xl">
-                            <RefreshCw className="w-5 h-5" /> {t.forceRelink}
-                        </button>
-                        <button onClick={onAutoSkip} className="px-14 py-5 bg-white/10 text-white text-[12px] font-black uppercase rounded-full border border-white/10 hover:bg-white/20 transition-all active:scale-95 flex items-center gap-4">
-                            <Shuffle className="w-5 h-5" /> {t.jumpNode}
-                        </button>
-                    </div>
-                </div>
+        <video ref={videoRef} className="w-full h-full object-contain" playsInline muted={isMuted} />
+
+        {showToast && (
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] flex items-center gap-2 bg-black/80 backdrop-blur-2xl px-4 py-2.5 rounded-2xl border border-white/10 animate-in zoom-in-95 duration-300">
+                <CheckCircle2 className="w-4 h-4 text-cyan-400" />
+                <span className="text-[10px] font-bold text-white uppercase">{showToast}</span>
             </div>
         )}
 
-        {[0, 1].map((index) => (
-            <video
-                key={index} ref={videoRefs[index]} playsInline muted={isMuted}
-                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-1000 z-10 ${activePlayerIndex === index && errorState === 'none' ? 'opacity-100' : 'opacity-0'}`}
-            />
-        ))}
-
-        <div className="absolute inset-0 pointer-events-none opacity-[0.05] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] z-20"></div>
-
-        {isRecording && (
-          <div className="absolute top-10 left-10 z-40 flex items-center gap-5 bg-black/70 backdrop-blur-3xl px-6 py-3 rounded-full border border-red-500/50 shadow-2xl animate-in slide-in-from-left duration-500">
-             <div className="w-4 h-4 bg-red-600 rounded-full animate-pulse shadow-[0_0_20px_#dc2626] ripple-dot relative"></div>
-             <span className="text-white text-[12px] font-black tracking-widest uppercase italic">{t.recording}</span>
-             <span className="text-red-400 font-mono text-sm font-black border-l border-white/20 pl-5">
-                 {Math.floor(recordingDuration/60).toString().padStart(2,'0')}:{(recordingDuration%60).toString().padStart(2,'0')}
-             </span>
-          </div>
+        {loading && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md z-30">
+                <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
+                <span className="text-[9px] font-black uppercase tracking-widest text-cyan-400 mt-3">{t.sync}</span>
+            </div>
         )}
 
-        {loading && errorState === 'none' && (
-             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/85 backdrop-blur-3xl z-30 space-y-8 animate-in fade-in duration-500">
-                <div className="relative w-24 h-24">
-                    <div className="absolute inset-0 border-[8px] border-cyan-500/10 rounded-full"></div>
-                    <div className="absolute inset-0 border-[8px] border-t-cyan-400 rounded-full animate-spin"></div>
-                    <Terminal className="absolute inset-0 m-auto w-8 h-8 text-cyan-400 animate-pulse" />
-                </div>
-                <div className="text-[12px] text-cyan-400 font-mono font-black uppercase tracking-[0.6em] animate-pulse">{t.syncing}</div>
-             </div>
+        {error && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-40 p-4">
+                <h3 className="text-white font-black uppercase text-xs">{t.fail}</h3>
+                <button onClick={initPlayer} className="mt-4 px-5 py-2 bg-white text-black text-[9px] font-bold rounded-full hover:bg-cyan-400 transition-all uppercase">{t.retry}</button>
+            </div>
         )}
 
-        {/* Console UI - 更加现代化的悬浮玻璃面板 */}
-        <div className={`absolute inset-x-10 bottom-10 p-8 bg-black/40 backdrop-blur-[60px] rounded-[2.5rem] border border-white/10 transition-all duration-700 shadow-3xl z-40 ${errorState !== 'none' ? 'opacity-0 translate-y-12' : 'opacity-0 translate-y-6 group-hover:opacity-100 group-hover:translate-y-0'}`}>
-            <div className="flex flex-col md:flex-row items-center justify-between gap-8">
-                <div className="flex items-center gap-8 min-w-0">
-                    <button onClick={() => {
-                        const v = videoRefs[activePlayerIndex].current;
-                        if (isPlaying) v?.pause(); else v?.play();
-                        setIsPlaying(!isPlaying);
-                    }} className="w-20 h-20 bg-white text-black rounded-full flex items-center justify-center transition-all hover:scale-110 hover:bg-cyan-400 active:scale-90 shadow-[0_20px_50px_rgba(255,255,255,0.25)] group/btn">
-                        {isPlaying ? <Square className="w-8 h-8 fill-current group-hover/btn:scale-110 transition-transform" /> : <Play className="w-8 h-8 fill-current ml-2 group-hover/btn:scale-110 transition-transform" />}
-                    </button>
-                    <div className="min-w-0">
-                        <div className="flex items-center gap-4 mb-2">
-                            <span className="px-3 py-1 bg-gradient-to-r from-red-600 to-rose-500 text-[10px] font-black text-white rounded-md shadow-xl uppercase tracking-widest animate-pulse">{t.live}</span>
-                            <h4 className="text-white font-black text-2xl tracking-tighter truncate max-w-xl uppercase italic leading-none">
-                                {channel?.name || t.searching}
-                            </h4>
+        {/* 响应式控制台 */}
+        <div className={`absolute inset-x-2 md:inset-x-6 bottom-2 md:bottom-6 p-3 md:p-5 bg-black/40 backdrop-blur-3xl rounded-2xl md:rounded-3xl border border-white/10 opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-2 group-hover:translate-y-0 z-50 shadow-2xl`}>
+            <div className="flex flex-col gap-2 md:gap-4">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <h4 className="text-white font-bold text-[11px] md:text-sm truncate max-w-[120px] md:max-w-[200px] italic">{channel?.name}</h4>
+                        <div className="flex items-center gap-1.5 text-[8px] text-white/40 uppercase font-black shrink-0">
+                            <span className="text-rose-500 animate-pulse">{t.live}</span>
+                            <span>•</span>
+                            <span>{country?.code}</span>
                         </div>
-                        <div className="flex items-center gap-4 text-white/30 text-[11px] font-black uppercase tracking-[0.2em] mt-3">
-                            <div className="flex items-center gap-2"><Zap className="w-4 h-4 text-cyan-400" /> {channel?.group || t.public}</div>
-                            <div className="w-1.5 h-1.5 rounded-full bg-white/20"></div>
-                            <div className="flex items-center gap-2"><Globe className="w-4 h-4" /> {country?.name || t.global}</div>
-                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 md:gap-4">
+                        <button onClick={takeScreenshot} className="p-1.5 md:p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-all">
+                            <Camera className="w-3.5 h-3.5 md:w-4 h-4" />
+                        </button>
+                        <button onClick={toggleRecording} className={`p-1.5 md:p-2 rounded-lg transition-all ${isRecording ? 'text-rose-500 bg-rose-500/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}>
+                            <Circle className={`w-3.5 h-3.5 md:w-4 h-4 ${isRecording ? 'fill-current' : ''}`} />
+                        </button>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                    <button 
-                        onClick={onToggleFavorite} 
-                        className={`p-5 rounded-[22px] transition-all active:scale-90 shadow-2xl ${isFavorite ? 'bg-amber-400 text-black shadow-amber-500/40 scale-110' : 'bg-white/5 text-white hover:bg-white/10 border border-white/10'}`}
-                        title="收藏"
-                    >
-                        <Star className={`w-6 h-6 ${isFavorite ? 'fill-current' : ''}`} />
-                    </button>
-                    
-                    <button onClick={takeScreenshot} title="卫星截屏" className="p-5 bg-white/5 text-white hover:bg-white/10 border border-white/10 rounded-[22px] transition-all active:scale-90 shadow-2xl">
-                        <Camera className="w-6 h-6" />
-                    </button>
-                    
-                    <button onClick={isRecording ? stopRecording : startRecording} title="实时录制" className={`p-5 rounded-[22px] transition-all shadow-2xl ${isRecording ? 'bg-red-600 text-white animate-pulse' : 'bg-white/5 text-white hover:bg-white/10 border border-white/10'}`}>
-                        <Circle className={`w-6 h-6 ${isRecording ? 'fill-current' : ''}`} />
-                    </button>
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 md:gap-6">
+                        <button onClick={() => { isPlaying ? videoRef.current?.pause() : videoRef.current?.play(); setIsPlaying(!isPlaying); }} className="w-8 h-8 md:w-10 md:h-10 bg-white text-black rounded-full flex items-center justify-center hover:scale-110 transition-transform">
+                            {isPlaying ? <Square className="w-3 h-3 md:w-4 h-4 fill-current" /> : <Play className="w-3 h-3 md:w-4 h-4 fill-current ml-0.5" />}
+                        </button>
 
-                    <div className="h-12 w-[1px] bg-white/10 mx-3"></div>
-
-                    <div className="flex items-center group/vol">
-                      <button onClick={() => setIsMuted(!isMuted)} className="p-5 bg-white/5 border border-white/10 hover:bg-white/10 rounded-[22px] text-white transition-all shadow-2xl">
-                          {isMuted || volume === 0 ? <VolumeX className="w-6 h-6 text-rose-500" /> : <Volume2 className="w-6 h-6" />}
-                      </button>
-                      <div className="w-0 overflow-hidden group-hover/vol:w-40 group-hover/vol:ml-6 transition-all duration-700 ease-out flex items-center">
-                          <input type="range" min="0" max="1" step="0.01" value={isMuted ? 0 : volume} onChange={(e) => { const v = parseFloat(e.target.value); setVolume(v); if (v > 0) setIsMuted(false); }} className="w-36 h-2 accent-cyan-400 bg-white/10 rounded-full appearance-none cursor-pointer" />
-                      </div>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => setIsMuted(!isMuted)} className="text-white hover:text-cyan-400 transition-colors">
+                                {isMuted ? <VolumeX className="w-4 h-4 md:w-5 h-5" /> : <Volume2 className="w-4 h-4 md:w-5 h-5" />}
+                            </button>
+                            <input 
+                                type="range" min="0" max="1" step="0.05" value={volume} 
+                                onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
+                                className="w-16 md:w-24 h-0.5 md:h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-cyan-400"
+                            />
+                        </div>
                     </div>
 
-                    <button onClick={() => videoRefs[activePlayerIndex].current?.requestFullscreen()} title="全屏视界" className="p-5 bg-white/5 border border-white/10 hover:bg-white/10 rounded-[22px] text-white transition-all shadow-2xl">
-                        <Maximize className="w-6 h-6" />
-                    </button>
+                    <div className="flex items-center gap-1.5 md:gap-2">
+                        <button onClick={onToggleFavorite} className={`p-2 md:p-2.5 rounded-lg md:rounded-xl transition-all ${isFavorite ? 'bg-amber-400 text-black' : 'bg-white/5 text-white hover:bg-white/10'}`}>
+                            <Star className={`w-3.5 h-3.5 md:w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+                        </button>
+                        <button onClick={() => videoRef.current?.requestFullscreen()} className="p-2 md:p-2.5 bg-white/5 text-white hover:bg-white/10 rounded-lg md:rounded-xl">
+                            <Maximize className="w-3.5 h-3.5 md:w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
