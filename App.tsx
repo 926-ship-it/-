@@ -50,6 +50,32 @@ const THEMES: AppTheme[] = [
       buttonActive: 'bg-gray-900 text-white', buttonPrimary: 'bg-gray-800 text-white',
       input: 'bg-white/80 border-gray-200 text-gray-900', font: 'font-serif', layoutShape: 'rounded-md', shadow: 'shadow-sm', accentColor: 'text-gray-500'
     }
+  },
+  {
+    id: 'candy',
+    name: { zh: '糖果极光', en: 'Candy' },
+    type: 'kids',
+    styles: {
+      bgMain: 'bg-aurora-candy', bgSidebar: 'bg-white/80 backdrop-blur-xl border-r border-rose-100',
+      textMain: 'text-rose-900', textDim: 'text-rose-300', border: 'border-rose-100',
+      card: 'bg-white/90 border border-rose-50 shadow-sm',
+      cardHover: 'hover:shadow-lg hover:shadow-rose-200/50', button: 'bg-rose-50 text-rose-500',
+      buttonActive: 'bg-rose-400 text-white', buttonPrimary: 'bg-rose-400 text-white',
+      input: 'bg-rose-50/50 border-rose-100 text-rose-900', font: 'font-sans', layoutShape: 'rounded-[2rem]', shadow: 'shadow-xl shadow-rose-100/50', accentColor: 'text-rose-400'
+    }
+  },
+  {
+    id: 'synth',
+    name: { zh: '霓虹电音', en: 'Synthwave' },
+    type: 'glass',
+    styles: {
+      bgMain: 'bg-aurora-synth', bgSidebar: 'bg-[#0a001a]/80 backdrop-blur-2xl border-r border-[#ff00ff]/20',
+      textMain: 'text-white', textDim: 'text-[#ff00ff]/40', border: 'border-[#ff00ff]/10',
+      card: 'bg-black/40 border border-[#ff00ff]/20 hover:border-[#ff00ff]/60',
+      cardHover: 'hover:shadow-[0_0_30px_rgba(255,0,255,0.2)]', button: 'bg-[#ff00ff]/10 text-[#ff00ff]',
+      buttonActive: 'bg-[#ff00ff] text-white shadow-[0_0_20px_rgba(255,0,255,0.5)]', buttonPrimary: 'bg-[#ff00ff] text-white',
+      input: 'bg-black/60 border-[#ff00ff]/30 text-white', font: 'font-sans', layoutShape: 'rounded-2xl', shadow: 'shadow-3xl shadow-purple-900/40', accentColor: 'text-[#ff00ff]'
+    }
   }
 ];
 
@@ -88,7 +114,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      // 提速：优先进入可操作状态
       const timeout = setTimeout(() => setIsReady(true), 2000);
       try {
         const data = await fetchCountries();
