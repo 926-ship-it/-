@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { 
   Play, RefreshCw, Square, Star, Volume2, Volume1, VolumeX, 
-  Maximize, Globe, Camera, Circle, Download, CheckCircle2, Activity, Shuffle
+  Maximize, Globe, Camera, Circle, Download, CheckCircle2, Activity, Shuffle, StopCircle
 } from 'lucide-react';
 import { AppTheme, Channel, Country, Language } from '../types';
 
@@ -22,15 +22,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState(false);
   const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const t = {
-    zh: { sync: '链路同步中...', fail: '信号锁定失败', retry: '重制连接', live: 'LIVE' },
-    en: { sync: 'Syncing...', fail: 'No Signal', retry: 'Relink', live: 'LIVE' }
+    zh: { 
+        sync: '链路同步中...', fail: '信号锁定失败', retry: '重制连接', live: 'LIVE',
+        snap: '快照已保存', recStart: '开始录制', recEnd: '录像已导出'
+    },
+    en: { 
+        sync: 'Syncing...', fail: 'No Signal', retry: 'Relink', live: 'LIVE',
+        snap: 'Snapshot Saved', recStart: 'Recording...', recEnd: 'Video Saved'
+    }
   }[lang];
 
   const initPlayer = useCallback(() => {
@@ -64,6 +75,67 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (videoRef.current) videoRef.current.volume = isMuted ? 0 : volume;
   }, [volume, isMuted]);
 
+  // 截图功能
+  const takeScreenshot = () => {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      try {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        const link = document.createElement('a');
+        link.download = `Looq_Snap_${channel?.name}_${new Date().getTime()}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        showToast(t.snap);
+      } catch (e) {
+        console.error("Screenshot failed due to CORS", e);
+      }
+    }
+  };
+
+  // 录屏功能
+  const toggleRecording = () => {
+    if (!videoRef.current) return;
+    
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      const stream = (videoRef.current as any).captureStream ? (videoRef.current as any).captureStream() : null;
+      if (!stream) return;
+
+      chunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+      mediaRecorderRef.current = recorder;
+      
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = `Looq_Rec_${channel?.name}_${new Date().getTime()}.webm`;
+        link.href = url;
+        link.click();
+        showToast(t.recEnd);
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      showToast(t.recStart);
+    }
+  };
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
   const { styles } = theme;
 
   return (
@@ -74,6 +146,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <div className="absolute inset-0 pointer-events-none z-10 bg-[radial-gradient(circle_at_center,transparent_40%,rgba(0,0,0,0.4)_100%)]"></div>
         
         <video ref={videoRef} className="w-full h-full object-contain" playsInline muted={isMuted} />
+
+        {/* 录制状态标识 */}
+        {isRecording && (
+            <div className="absolute top-4 right-4 flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-full backdrop-blur-md border border-rose-500/50 z-40 animate-pulse">
+                <span className="w-2 h-2 bg-rose-500 rounded-full"></span>
+                <span className="text-[10px] font-black text-rose-500 tracking-widest">REC</span>
+            </div>
+        )}
+
+        {/* Toast 提示 */}
+        {toast && (
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-cyan-500 text-black px-6 py-2 rounded-full font-black text-xs uppercase tracking-widest z-[60] shadow-2xl animate-in zoom-in duration-300">
+                {toast}
+            </div>
+        )}
 
         {/* 状态叠加层 */}
         {loading && (
@@ -108,16 +195,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                                 </span>
                                 <span className="text-[7px] md:text-[10px] font-black text-rose-500 uppercase tracking-widest">{t.live}</span>
                                 <div className="h-1 w-1 rounded-full bg-white/20 hidden md:block"></div>
-                                <span className="text-[8px] md:text-[10px] text-white/40 uppercase font-black hidden md:block">{country?.name} • NODE-{channel?.id?.slice(0,4)}</span>
+                                <span className="text-[8px] md:text-[10px] text-white/40 uppercase font-black hidden md:block">{country?.name} • {channel?.group}</span>
                             </div>
                         </div>
                     </div>
                     <div className="flex items-center gap-1.5 md:gap-3">
-                        {onRandom && (
-                            <button onClick={onRandom} className="p-2 md:p-3 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-xl transition-all">
-                                <Shuffle className="w-3.5 h-3.5 md:w-5 h-5" />
-                            </button>
-                        )}
                         <button onClick={onToggleFavorite} className={`p-2 md:p-3 rounded-xl transition-all ${isFavorite ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
                             <Star className={`w-3.5 h-3.5 md:w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
                         </button>
@@ -125,14 +207,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4 md:gap-10">
+                    <div className="flex items-center gap-2 md:gap-10">
                         <button onClick={() => { isPlaying ? videoRef.current?.pause() : videoRef.current?.play(); setIsPlaying(!isPlaying); }} className="w-10 h-10 md:w-16 md:h-16 bg-white text-black rounded-2xl md:rounded-3xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl">
                             {isPlaying ? <Square className="w-4 h-4 md:w-6 md:h-6 fill-current" /> : <Play className="w-4 h-4 md:w-6 md:h-6 fill-current ml-1" />}
                         </button>
 
                         <div className="flex items-center gap-3">
                             <button onClick={() => setIsMuted(!isMuted)} className="text-white/60 hover:text-white transition-colors">
-                                {isMuted ? <VolumeX className="w-5 h-5 md:w-6 md:h-6" /> : <Volume2 className="w-5 h-5 md:w-6 md:h-6" />}
+                                {isMuted ? <VolumeX className="w-5 h-5 md:w-6 h-6" /> : <Volume2 className="w-5 h-5 md:w-6 h-6" />}
                             </button>
                             <input 
                                 type="range" min="0" max="1" step="0.05" value={volume} 
@@ -142,7 +224,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 md:gap-3">
+                        <button onClick={takeScreenshot} title="截图" className="p-2.5 md:p-4 bg-white/10 text-white hover:bg-white/20 rounded-xl md:rounded-2xl transition-all">
+                            <Camera className="w-4 h-4 md:w-5 h-5" />
+                        </button>
+                        <button onClick={toggleRecording} title={isRecording ? "停止录制" : "录制"} className={`p-2.5 md:p-4 ${isRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'} rounded-xl md:rounded-2xl transition-all`}>
+                            {isRecording ? <StopCircle className="w-4 h-4 md:w-5 h-5" /> : <Circle className="w-4 h-4 md:w-5 h-5" />}
+                        </button>
                         <button onClick={() => videoRef.current?.requestFullscreen()} className="p-2.5 md:p-4 bg-white/10 text-white hover:bg-white/20 rounded-xl md:rounded-2xl transition-all">
                             <Maximize className="w-4 h-4 md:w-5 h-5" />
                         </button>
