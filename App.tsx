@@ -89,13 +89,17 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
+      // 优化加载：如果 API 响应慢，优先进入 Ready 状态展示默认内容
+      const initTimer = setTimeout(() => setIsReady(true), 2500);
       try {
         const data = await fetchCountries();
         setCountries(data);
-        setSelectedCountry(data[0] || GLOBAL_COUNTRY);
+        if (!selectedCountry) setSelectedCountry(data[0] || GLOBAL_COUNTRY);
+        
         const savedFavs = localStorage.getItem('looq_favs');
         if (savedFavs) setFavorites(JSON.parse(savedFavs));
       } catch (e) { console.error(e); }
+      clearTimeout(initTimer);
       setIsReady(true);
     };
     init();
@@ -112,6 +116,7 @@ const App: React.FC = () => {
             data = mode === 'tv' ? await fetchChannelsByCountry(selectedCountry.code) : await fetchRadioStations(selectedCountry.code);
         }
         setChannels(data);
+        // 如果没有当前播放频道，默认播放列表第一个
         if (data.length > 0 && !currentChannel) setCurrentChannel(data[0]);
     } catch (e) { setChannels([]); }
     setLoading(false);
@@ -136,12 +141,16 @@ const App: React.FC = () => {
 
   if (!isReady) return (
     <div className="h-screen w-full bg-[#050508] flex flex-col items-center justify-center">
-        <Loader2 className="w-8 h-8 text-cyan-500 animate-spin" />
+        <div className="relative">
+            <Loader2 className="w-12 h-12 text-cyan-500 animate-spin" />
+            <Globe className="w-6 h-6 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+        </div>
+        <span className="mt-4 text-[10px] font-black uppercase tracking-[0.4em] text-cyan-500/50 animate-pulse">Syncing Galaxy...</span>
     </div>
   );
 
   return (
-    <div className={`flex h-screen w-full ${theme.styles.bgMain} ${theme.styles.font} overflow-hidden relative`}>
+    <div className={`flex h-screen w-full ${theme.styles.bgMain} ${theme.styles.font} overflow-hidden relative transition-colors duration-1000`}>
       <Sidebar 
         countries={countries} selectedCountry={selectedCountry} 
         onSelectCountry={(c) => { setDiscoveryTag(null); setSelectedCountry(c); }}

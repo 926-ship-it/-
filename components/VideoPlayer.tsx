@@ -56,11 +56,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
 
         const url = channel.url;
+        // HLS.js 优化版初始化
         if (url.toLowerCase().includes('.m3u8') && Hls.isSupported()) {
             const hls = new Hls({
                 enableWorker: true,
                 lowLatencyMode: true,
-                backBufferLength: 60
+                backBufferLength: 60,
+                maxBufferLength: 30,
+                maxMaxBufferLength: 60,
+                manifestLoadingTimeOut: 15000,
+                manifestLoadingMaxRetry: 4,
+                levelLoadingTimeOut: 15000,
+                fragLoadingTimeOut: 15000,
+                startFragPrefetch: true
             });
             hlsRef.current = hls;
             hls.loadSource(url);
@@ -72,15 +80,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             });
             hls.on(Hls.Events.ERROR, (_, data) => {
                 if (data.fatal) {
-                    setError(true);
-                    setLoading(false);
+                    console.error("HLS fatal error:", data.type);
+                    // 只有在致命错误且重试无效后才报黑屏
+                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                        hls.startLoad();
+                    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                        hls.recoverMediaError();
+                    } else {
+                        setError(true);
+                        setLoading(false);
+                    }
                 }
             });
         } else {
+            // 普通 MP4 或直接支持 M3U8 的浏览器
             videoRef.current.crossOrigin = "anonymous";
             videoRef.current.src = url;
             videoRef.current.oncanplay = () => {
                 setLoading(false);
+                setError(false);
                 videoRef.current?.play().catch(() => setIsPlaying(false));
                 setIsPlaying(true);
             };
@@ -139,7 +157,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (!stream) return;
 
         chunksRef.current = [];
-        // 自动选择支持的 MIME 类型，避免崩溃
         const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') 
             ? 'video/webm;codecs=vp9' 
             : MediaRecorder.isTypeSupported('video/webm') 
@@ -234,7 +251,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
                         <div className="flex items-center gap-3">
                             <button onClick={() => setIsMuted(!isMuted)} className="text-white/60 hover:text-white transition-colors">
-                                {isMuted ? <VolumeX className="w-5 h-5 md:w-6 md:h-6" /> : <Volume2 className="w-5 h-5 md:w-6 md:h-6" />}
+                                {isMuted ? <VolumeX className="w-5 h-5 md:w-6 h-6" /> : <Volume2 className="w-5 h-5 md:w-6 h-6" />}
                             </button>
                             <input 
                                 type="range" min="0" max="1" step="0.05" value={volume} 
