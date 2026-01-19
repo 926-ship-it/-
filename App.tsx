@@ -22,7 +22,7 @@ const THEMES: AppTheme[] = [
       card: 'glass-card hover:border-cyan-500/40',
       cardHover: 'hover:shadow-[0_0_40px_rgba(6,182,212,0.15)]', button: 'bg-white/5 text-white',
       buttonActive: 'bg-cyan-500 text-black shadow-lg', buttonPrimary: 'bg-cyan-400 text-black',
-      input: 'bg-black/40 border-white/10 text-white', font: 'font-sans', layoutShape: 'rounded-[2rem]', shadow: 'shadow-2xl', accentColor: 'text-cyan-400'
+      input: 'bg-black/40 border-white/10 text-white', font: 'font-sans', layoutShape: 'rounded-[1.5rem] md:rounded-[2rem]', shadow: 'shadow-2xl', accentColor: 'text-cyan-400'
     }
   },
   {
@@ -64,14 +64,18 @@ const App: React.FC = () => {
     const timer = setInterval(() => {
       if (!selectedCountry) return;
       const tz = getTimezone(selectedCountry.code);
-      const time = new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
-        timeZone: tz,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      }).format(new Date());
-      setLocalTime(time);
+      try {
+        const time = new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
+          timeZone: tz,
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        }).format(new Date());
+        setLocalTime(time);
+      } catch (e) {
+        setLocalTime('--:--:--');
+      }
     }, 1000);
     return () => clearInterval(timer);
   }, [selectedCountry, lang]);
@@ -134,56 +138,58 @@ const App: React.FC = () => {
         history={[]} lang={lang} reminders={[]} onDeleteReminder={()=>{}} onPlayReminder={()=>{}}
       />
 
-      <main className="flex-1 flex flex-col h-full min-w-0 z-10">
-        <header className={`px-4 md:px-8 py-3 md:py-4 flex items-center justify-between border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all`}>
-            <div className="flex items-center gap-3 md:gap-5 min-w-0">
+      <main className="flex-1 flex flex-col h-full min-w-0 z-10 relative">
+        <header className={`px-3 md:px-8 py-2 md:py-4 flex items-center justify-between border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
+            <div className="flex items-center gap-3 md:gap-6 min-w-0">
                 <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 text-white/80"><Menu className="w-5 h-5" /></button>
-                <div className="flex flex-col md:flex-row md:items-center gap-0 md:gap-4 min-w-0">
+                <div className="flex items-center gap-3 md:gap-5 min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className="text-xl md:text-2xl shrink-0">{selectedCountry?.flag}</span>
-                        <h1 className={`text-xs md:text-lg font-black uppercase tracking-tighter truncate ${theme.styles.textMain}`}>
+                        <span className="text-xl md:text-2xl shrink-0 leading-none">{selectedCountry?.flag}</span>
+                        <h1 className={`text-[11px] md:text-lg font-black uppercase tracking-tighter truncate ${theme.styles.textMain}`}>
                             {discoveryTag || selectedCountry?.name}
                         </h1>
                     </div>
-                    {/* 当地时间回归 */}
-                    <div className="flex items-center gap-2 opacity-40">
-                        <Clock className="w-3 h-3 md:w-3.5 md:h-3.5 text-cyan-400" />
-                        <span className="text-[9px] md:text-[11px] font-mono font-bold tracking-widest text-white">{localTime}</span>
+                    {/* 当地时间 - 手机端也强制显示，缩小字体 */}
+                    <div className="flex items-center gap-1.5 opacity-50 shrink-0">
+                        <Clock className="w-2.5 h-2.5 md:w-3.5 md:h-3.5 text-cyan-400" />
+                        <span className="text-[9px] md:text-[11px] font-mono font-black tracking-widest text-white">{localTime}</span>
                     </div>
                 </div>
             </div>
             <div className="flex items-center gap-2 md:gap-4 shrink-0">
-                <button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className="text-[9px] md:text-[10px] font-black text-white/30 hover:text-white/60 uppercase">
+                <button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className="text-[8px] md:text-[10px] font-black text-white/20 hover:text-white/60 uppercase px-2 py-1">
                     {lang === 'zh' ? 'EN' : 'CN'}
                 </button>
                 <button onClick={() => loadChannels()} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} ${loading ? 'animate-spin' : ''}`}>
-                    <RefreshCw className="w-3.5 h-3.5 md:w-4 h-4" />
+                    <RefreshCw className="w-3 h-3 md:w-4 h-4" />
                 </button>
             </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-10 scrollbar-thin scroll-smooth">
-            <div className="max-w-7xl mx-auto space-y-6 md:space-y-10">
-                {/* 发现标签条回归 */}
-                <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none no-scrollbar">
-                    <Hash className="w-4 h-4 text-cyan-400 shrink-0 opacity-40" />
+        <div className="flex-1 overflow-y-auto p-3 md:p-10 scrollbar-thin scroll-smooth no-scrollbar md:scrollbar-auto">
+            <div className="max-w-7xl mx-auto space-y-4 md:space-y-10">
+                {/* 发现标签条 - 优化移动端滚动体验 */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none no-scrollbar snap-x">
+                    <div className="flex items-center gap-2 shrink-0 pr-2 border-r border-white/5 mr-1">
+                        <Hash className="w-3.5 h-3.5 text-cyan-400 opacity-30" />
+                    </div>
                     {DISCOVERY_TAGS.map(tag => (
                         <button 
                             key={tag} 
                             onClick={() => { setDiscoveryTag(tag); setSelectedCountry(GLOBAL_COUNTRY); }}
-                            className={`px-4 py-1.5 rounded-full text-[10px] md:text-[11px] font-black uppercase tracking-widest transition-all shrink-0 border ${discoveryTag === tag ? 'bg-cyan-500 text-black border-transparent' : `bg-white/5 ${theme.styles.textDim} border-white/5 hover:border-white/20`}`}
+                            className={`px-3 md:px-5 py-1.5 rounded-full text-[9px] md:text-[11px] font-black uppercase tracking-widest transition-all shrink-0 border snap-start ${discoveryTag === tag ? 'bg-cyan-500 text-black border-transparent shadow-lg shadow-cyan-500/20' : `bg-white/5 ${theme.styles.textDim} border-white/5 hover:border-white/20`}`}
                         >
                             {tag}
                         </button>
                     ))}
                     {discoveryTag && (
-                        <button onClick={() => setDiscoveryTag(null)} className="p-1 text-rose-400 hover:scale-110 transition-transform"><Shuffle className="w-4 h-4" /></button>
+                        <button onClick={() => setDiscoveryTag(null)} className="p-1 text-rose-400 hover:scale-110 transition-transform shrink-0"><Shuffle className="w-3.5 h-3.5" /></button>
                     )}
                 </div>
 
-                <section className="space-y-4">
-                    {/* 限制播放器在大屏下的过度撑开 */}
-                    <div className="max-w-5xl mx-auto">
+                <section className="space-y-3">
+                    {/* 限制播放器在大屏下的过度撑开：使用 max-w-5xl 和 aspect-video 控制 */}
+                    <div className="max-w-5xl mx-auto w-full">
                         <VideoPlayer 
                             channel={currentChannel} country={selectedCountry} theme={theme}
                             isFavorite={!!currentChannel && favorites.some(f => f.id === currentChannel.id)}
@@ -191,18 +197,20 @@ const App: React.FC = () => {
                             lang={lang}
                         />
                     </div>
-                    <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={setCurrentChannel} theme={theme} mode={mode} />
+                    <div className="max-w-5xl mx-auto w-full">
+                        <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={setCurrentChannel} theme={theme} mode={mode} />
+                    </div>
                 </section>
 
-                <section className="space-y-4 md:space-y-6">
+                <section className="space-y-4">
                     <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                        <div className="flex items-center gap-3">
-                            <Sparkles className="w-4 h-4 text-cyan-400" />
-                            <h2 className={`text-[10px] md:text-sm font-black uppercase tracking-widest ${theme.styles.textMain}`}>
-                                {lang === 'zh' ? '链路终端扫描' : 'UPLINK SCAN'}
+                        <div className="flex items-center gap-2.5">
+                            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                            <h2 className={`text-[9px] md:text-sm font-black uppercase tracking-widest ${theme.styles.textMain}`}>
+                                {lang === 'zh' ? '链路波段扫描' : 'UPLINK SCAN'}
                             </h2>
                         </div>
-                        <span className="text-[8px] md:text-[10px] font-black opacity-20 uppercase tracking-[0.2em]">{channels.length} NODES FOUND</span>
+                        <span className="text-[8px] md:text-[10px] font-black opacity-10 uppercase tracking-[0.2em]">{channels.length} NODES AVAILABLE</span>
                     </div>
                     <ChannelGrid 
                         channels={channels} currentChannel={currentChannel} onSelectChannel={setCurrentChannel}
@@ -210,7 +218,7 @@ const App: React.FC = () => {
                     />
                 </section>
 
-                <section className="flex justify-end pt-8 pb-16 md:pb-24">
+                <section className="flex justify-end pt-8 pb-20 md:pb-24">
                     <AiChatPet theme={theme} currentChannels={channels} onSelectChannel={setCurrentChannel} lang={lang} />
                 </section>
             </div>
