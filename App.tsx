@@ -9,7 +9,8 @@ import { SettingsModal } from './components/SettingsModal';
 import { ImportModal } from './components/ImportModal';
 import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, fetchGlobalChannelsByCategory, getTimezone, GLOBAL_COUNTRY, parseM3U } from './services/iptvService';
 import { Country, Channel, AppTheme, Reminder, Language, AppSettings } from './types';
-import { Menu, RefreshCw, Shuffle, Globe, Loader2, Sparkles, Clock, Hash } from 'lucide-react';
+// Added X to the import list to fix "Cannot find name 'X'" error
+import { Menu, RefreshCw, Shuffle, Globe, Loader2, Sparkles, Clock, Hash, Zap, X } from 'lucide-react';
 
 const THEMES: AppTheme[] = [
   {
@@ -103,7 +104,7 @@ const App: React.FC = () => {
             data = mode === 'tv' ? await fetchChannelsByCountry(selectedCountry.code) : await fetchRadioStations(selectedCountry.code);
         }
         setChannels(data);
-        if (data.length > 0 && !currentChannel) setCurrentChannel(data[0]);
+        if (data.length > 0 && !currentChannel) setCurrentChannel(data[Math.floor(Math.random() * data.length)]);
     } catch (e) { setChannels([]); }
     setLoading(false);
   }, [selectedCountry, mode, discoveryTag]);
@@ -117,6 +118,12 @@ const App: React.FC = () => {
         localStorage.setItem('looq_favs', JSON.stringify(next));
         return next;
     });
+  };
+
+  const handleRandomPlay = () => {
+    if (channels.length === 0) return;
+    const randomIdx = Math.floor(Math.random() * channels.length);
+    setCurrentChannel(channels[randomIdx]);
   };
 
   if (!isReady) return (
@@ -139,39 +146,46 @@ const App: React.FC = () => {
       />
 
       <main className="flex-1 flex flex-col h-full min-w-0 z-10 relative">
-        <header className={`px-3 md:px-8 py-2 md:py-4 flex items-center justify-between border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
+        <header className={`px-4 md:px-8 py-2 md:py-4 flex items-center justify-between border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
             <div className="flex items-center gap-3 md:gap-6 min-w-0">
                 <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 text-white/80"><Menu className="w-5 h-5" /></button>
-                <div className="flex items-center gap-3 md:gap-5 min-w-0">
+                <div className="flex flex-col md:flex-row md:items-center gap-0 md:gap-5 min-w-0">
                     <div className="flex items-center gap-2">
                         <span className="text-xl md:text-2xl shrink-0 leading-none">{selectedCountry?.flag}</span>
                         <h1 className={`text-[11px] md:text-lg font-black uppercase tracking-tighter truncate ${theme.styles.textMain}`}>
                             {discoveryTag || selectedCountry?.name}
                         </h1>
                     </div>
-                    {/* 当地时间 - 手机端也强制显示，缩小字体 */}
-                    <div className="flex items-center gap-1.5 opacity-50 shrink-0">
+                    {/* 当地时间 - 手机端紧凑显示 */}
+                    <div className="flex items-center gap-1.5 opacity-60">
                         <Clock className="w-2.5 h-2.5 md:w-3.5 md:h-3.5 text-cyan-400" />
                         <span className="text-[9px] md:text-[11px] font-mono font-black tracking-widest text-white">{localTime}</span>
                     </div>
                 </div>
             </div>
             <div className="flex items-center gap-2 md:gap-4 shrink-0">
-                <button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className="text-[8px] md:text-[10px] font-black text-white/20 hover:text-white/60 uppercase px-2 py-1">
+                <button 
+                  onClick={handleRandomPlay} 
+                  title={lang === 'zh' ? '随机播放' : 'Random Play'}
+                  className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} hover:text-cyan-400 transition-colors`}
+                >
+                    <Shuffle className="w-3.5 h-3.5 md:w-4 h-4" />
+                </button>
+                <button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className="text-[8px] md:text-[10px] font-black text-white/20 hover:text-white/60 uppercase px-1">
                     {lang === 'zh' ? 'EN' : 'CN'}
                 </button>
                 <button onClick={() => loadChannels()} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} ${loading ? 'animate-spin' : ''}`}>
-                    <RefreshCw className="w-3 h-3 md:w-4 h-4" />
+                    <RefreshCw className="w-3.5 h-3.5 md:w-4 h-4" />
                 </button>
             </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-3 md:p-10 scrollbar-thin scroll-smooth no-scrollbar md:scrollbar-auto">
-            <div className="max-w-7xl mx-auto space-y-4 md:space-y-10">
-                {/* 发现标签条 - 优化移动端滚动体验 */}
+            <div className="max-w-7xl mx-auto space-y-4 md:space-y-8">
+                {/* 发现标签条 - 增强移动端存在感 */}
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none no-scrollbar snap-x">
-                    <div className="flex items-center gap-2 shrink-0 pr-2 border-r border-white/5 mr-1">
-                        <Hash className="w-3.5 h-3.5 text-cyan-400 opacity-30" />
+                    <div className="flex items-center gap-2 shrink-0 pr-2 border-r border-white/10 mr-1">
+                        <Zap className="w-3.5 h-3.5 text-amber-400 opacity-60" />
                     </div>
                     {DISCOVERY_TAGS.map(tag => (
                         <button 
@@ -183,21 +197,22 @@ const App: React.FC = () => {
                         </button>
                     ))}
                     {discoveryTag && (
-                        <button onClick={() => setDiscoveryTag(null)} className="p-1 text-rose-400 hover:scale-110 transition-transform shrink-0"><Shuffle className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setDiscoveryTag(null)} className="p-1 text-rose-400 hover:scale-110 transition-transform shrink-0"><X className="w-3.5 h-3.5" /></button>
                     )}
                 </div>
 
                 <section className="space-y-3">
-                    {/* 限制播放器在大屏下的过度撑开：使用 max-w-5xl 和 aspect-video 控制 */}
-                    <div className="max-w-5xl mx-auto w-full">
+                    {/* 优化大屏播放器占比：限制宽度并居中，增加纵深感 */}
+                    <div className="max-w-4xl lg:max-w-5xl mx-auto w-full group/player">
                         <VideoPlayer 
                             channel={currentChannel} country={selectedCountry} theme={theme}
                             isFavorite={!!currentChannel && favorites.some(f => f.id === currentChannel.id)}
                             onToggleFavorite={() => currentChannel && toggleFavorite(currentChannel)}
                             lang={lang}
+                            onRandom={handleRandomPlay}
                         />
                     </div>
-                    <div className="max-w-5xl mx-auto w-full">
+                    <div className="max-w-4xl lg:max-w-5xl mx-auto w-full">
                         <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={setCurrentChannel} theme={theme} mode={mode} />
                     </div>
                 </section>
