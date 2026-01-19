@@ -9,7 +9,6 @@ import { SettingsModal } from './components/SettingsModal';
 import { ImportModal } from './components/ImportModal';
 import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, fetchGlobalChannelsByCategory, getTimezone, GLOBAL_COUNTRY, parseM3U } from './services/iptvService';
 import { Country, Channel, AppTheme, Reminder, Language, AppSettings } from './types';
-// Added X to the import list to fix "Cannot find name 'X'" error
 import { Menu, RefreshCw, Shuffle, Globe, Loader2, Sparkles, Clock, Hash, Zap, X } from 'lucide-react';
 
 const THEMES: AppTheme[] = [
@@ -38,6 +37,19 @@ const THEMES: AppTheme[] = [
       buttonActive: 'bg-gray-900 text-white', buttonPrimary: 'bg-gray-800 text-white',
       input: 'bg-white/80 border-gray-200 text-gray-900', font: 'font-serif', layoutShape: 'rounded-md', shadow: 'shadow-sm', accentColor: 'text-gray-500'
     }
+  },
+  {
+    id: 'acid',
+    name: { zh: '酸性未来', en: 'Acid' },
+    type: 'acid',
+    styles: {
+      bgMain: 'bg-aurora-acid', bgSidebar: 'bg-black/80 border-r border-[#ccff00]/20',
+      textMain: 'text-[#ccff00]', textDim: 'text-[#ccff00]/40', border: 'border-[#ccff00]/10',
+      card: 'bg-black border border-[#ccff00]/20 hover:border-[#ccff00]',
+      cardHover: 'hover:shadow-[0_0_30px_rgba(204,255,0,0.2)]', button: 'bg-[#ccff00]/10 text-[#ccff00]',
+      buttonActive: 'bg-[#ccff00] text-black font-black', buttonPrimary: 'bg-[#ccff00] text-black',
+      input: 'bg-black border-[#ccff00]/30 text-[#ccff00]', font: 'font-mono', layoutShape: 'rounded-none', shadow: 'shadow-none', accentColor: 'text-[#ccff00]'
+    }
   }
 ];
 
@@ -60,7 +72,6 @@ const App: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [localTime, setLocalTime] = useState('');
 
-  // 实时当地时间逻辑
   useEffect(() => {
     const timer = setInterval(() => {
       if (!selectedCountry) return;
@@ -68,26 +79,23 @@ const App: React.FC = () => {
       try {
         const time = new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
           timeZone: tz,
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false
+          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
         }).format(new Date());
         setLocalTime(time);
-      } catch (e) {
-        setLocalTime('--:--:--');
-      }
+      } catch (e) { setLocalTime('--:--:--'); }
     }, 1000);
     return () => clearInterval(timer);
   }, [selectedCountry, lang]);
 
   useEffect(() => {
     const init = async () => {
-      const data = await fetchCountries();
-      setCountries(data);
-      setSelectedCountry(data[0]);
-      const savedFavs = localStorage.getItem('looq_favs');
-      if (savedFavs) setFavorites(JSON.parse(savedFavs));
+      try {
+        const data = await fetchCountries();
+        setCountries(data);
+        setSelectedCountry(data[0] || GLOBAL_COUNTRY);
+        const savedFavs = localStorage.getItem('looq_favs');
+        if (savedFavs) setFavorites(JSON.parse(savedFavs));
+      } catch (e) { console.error(e); }
       setIsReady(true);
     };
     init();
@@ -104,7 +112,7 @@ const App: React.FC = () => {
             data = mode === 'tv' ? await fetchChannelsByCountry(selectedCountry.code) : await fetchRadioStations(selectedCountry.code);
         }
         setChannels(data);
-        if (data.length > 0 && !currentChannel) setCurrentChannel(data[Math.floor(Math.random() * data.length)]);
+        if (data.length > 0 && !currentChannel) setCurrentChannel(data[0]);
     } catch (e) { setChannels([]); }
     setLoading(false);
   }, [selectedCountry, mode, discoveryTag]);
@@ -147,28 +155,23 @@ const App: React.FC = () => {
 
       <main className="flex-1 flex flex-col h-full min-w-0 z-10 relative">
         <header className={`px-4 md:px-8 py-2 md:py-4 flex items-center justify-between border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
-            <div className="flex items-center gap-3 md:gap-6 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
                 <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 text-white/80"><Menu className="w-5 h-5" /></button>
                 <div className="flex flex-col md:flex-row md:items-center gap-0 md:gap-5 min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className="text-xl md:text-2xl shrink-0 leading-none">{selectedCountry?.flag}</span>
+                        <span className="text-xl md:text-2xl leading-none">{selectedCountry?.flag}</span>
                         <h1 className={`text-[11px] md:text-lg font-black uppercase tracking-tighter truncate ${theme.styles.textMain}`}>
                             {discoveryTag || selectedCountry?.name}
                         </h1>
                     </div>
-                    {/* 当地时间 - 手机端紧凑显示 */}
                     <div className="flex items-center gap-1.5 opacity-60">
-                        <Clock className="w-2.5 h-2.5 md:w-3.5 md:h-3.5 text-cyan-400" />
+                        <Clock className="w-2.5 h-2.5 text-cyan-400" />
                         <span className="text-[9px] md:text-[11px] font-mono font-black tracking-widest text-white">{localTime}</span>
                     </div>
                 </div>
             </div>
-            <div className="flex items-center gap-2 md:gap-4 shrink-0">
-                <button 
-                  onClick={handleRandomPlay} 
-                  title={lang === 'zh' ? '随机播放' : 'Random Play'}
-                  className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} hover:text-cyan-400 transition-colors`}
-                >
+            <div className="flex items-center gap-2 shrink-0">
+                <button onClick={handleRandomPlay} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} hover:text-cyan-400 transition-colors`}>
                     <Shuffle className="w-3.5 h-3.5 md:w-4 h-4" />
                 </button>
                 <button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className="text-[8px] md:text-[10px] font-black text-white/20 hover:text-white/60 uppercase px-1">
@@ -180,10 +183,9 @@ const App: React.FC = () => {
             </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-3 md:p-10 scrollbar-thin scroll-smooth no-scrollbar md:scrollbar-auto">
+        <div className="flex-1 overflow-y-auto p-3 md:p-10 scrollbar-thin">
             <div className="max-w-7xl mx-auto space-y-4 md:space-y-8">
-                {/* 发现标签条 - 增强移动端存在感 */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none no-scrollbar snap-x">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar snap-x">
                     <div className="flex items-center gap-2 shrink-0 pr-2 border-r border-white/10 mr-1">
                         <Zap className="w-3.5 h-3.5 text-amber-400 opacity-60" />
                     </div>
@@ -191,19 +193,18 @@ const App: React.FC = () => {
                         <button 
                             key={tag} 
                             onClick={() => { setDiscoveryTag(tag); setSelectedCountry(GLOBAL_COUNTRY); }}
-                            className={`px-3 md:px-5 py-1.5 rounded-full text-[9px] md:text-[11px] font-black uppercase tracking-widest transition-all shrink-0 border snap-start ${discoveryTag === tag ? 'bg-cyan-500 text-black border-transparent shadow-lg shadow-cyan-500/20' : `bg-white/5 ${theme.styles.textDim} border-white/5 hover:border-white/20`}`}
+                            className={`px-3 md:px-5 py-1.5 rounded-full text-[9px] md:text-[11px] font-black uppercase tracking-widest transition-all shrink-0 border snap-start ${discoveryTag === tag ? 'bg-cyan-500 text-black border-transparent' : `bg-white/5 ${theme.styles.textDim} border-white/5`}`}
                         >
                             {tag}
                         </button>
                     ))}
                     {discoveryTag && (
-                        <button onClick={() => setDiscoveryTag(null)} className="p-1 text-rose-400 hover:scale-110 transition-transform shrink-0"><X className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setDiscoveryTag(null)} className="p-1 text-rose-400 hover:scale-110 shrink-0"><X className="w-3.5 h-3.5" /></button>
                     )}
                 </div>
 
                 <section className="space-y-3">
-                    {/* 优化大屏播放器占比：限制宽度并居中，增加纵深感 */}
-                    <div className="max-w-4xl lg:max-w-5xl mx-auto w-full group/player">
+                    <div className="max-w-4xl lg:max-w-5xl mx-auto w-full">
                         <VideoPlayer 
                             channel={currentChannel} country={selectedCountry} theme={theme}
                             isFavorite={!!currentChannel && favorites.some(f => f.id === currentChannel.id)}
@@ -225,7 +226,6 @@ const App: React.FC = () => {
                                 {lang === 'zh' ? '链路波段扫描' : 'UPLINK SCAN'}
                             </h2>
                         </div>
-                        <span className="text-[8px] md:text-[10px] font-black opacity-10 uppercase tracking-[0.2em]">{channels.length} NODES AVAILABLE</span>
                     </div>
                     <ChannelGrid 
                         channels={channels} currentChannel={currentChannel} onSelectChannel={setCurrentChannel}
