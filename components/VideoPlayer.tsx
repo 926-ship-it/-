@@ -200,9 +200,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         </div>
                     </div>
                     <div className="flex items-center gap-1.5 md:gap-3">
-                        <button onClick={onToggleFavorite} className={`p-2 md:p-3 rounded-xl transition-all ${isFavorite ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
-                            <Star className={`w-3.5 h-3.5 md:w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
-                        </button>
+                        {/* 顶部行现在只保留频道信息，让布局更清爽 */}
                     </div>
                 </div>
 
@@ -225,6 +223,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 md:gap-3">
+                        {/* 收藏按钮已移动至此 */}
+                        <button onClick={onToggleFavorite} title="收藏" className={`p-2.5 md:p-4 rounded-xl md:rounded-2xl transition-all ${isFavorite ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                            <Star className={`w-4 h-4 md:w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
+                        </button>
                         <button onClick={takeScreenshot} title="截图" className="p-2.5 md:p-4 bg-white/10 text-white hover:bg-white/20 rounded-xl md:rounded-2xl transition-all">
                             <Camera className="w-4 h-4 md:w-5 h-5" />
                         </button>
