@@ -187,7 +187,7 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col h-full min-w-0 z-10 relative">
         <header className={`px-4 md:px-8 py-2 md:py-4 flex items-center justify-between border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
             <div className="flex items-center gap-3 min-w-0">
-                <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 text-white/80"><Menu className="w-5 h-5" /></button>
+                <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 opacity-80"><Menu className={`w-5 h-5 ${theme.styles.textMain}`} /></button>
                 <div className="flex flex-col md:flex-row md:items-center gap-0 md:gap-5 min-w-0">
                     <div className="flex items-center gap-2">
                         <span className="text-xl md:text-2xl leading-none">{selectedCountry?.flag}</span>
@@ -195,17 +195,17 @@ const App: React.FC = () => {
                             {discoveryTag || selectedCountry?.name}
                         </h1>
                     </div>
-                    <div className="flex items-center gap-1.5 opacity-60">
-                        <Clock className="w-2.5 h-2.5 text-cyan-400" />
-                        <span className="text-[9px] md:text-[11px] font-mono font-black tracking-widest text-white">{localTime}</span>
+                    <div className="flex items-center gap-1.5">
+                        <Clock className={`w-2.5 h-2.5 ${theme.styles.accentColor} opacity-70`} />
+                        <span className={`text-[9px] md:text-[11px] font-mono font-black tracking-widest ${theme.styles.textMain} opacity-80`}>{localTime}</span>
                     </div>
                 </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-                <button onClick={handleRandomPlay} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} hover:text-cyan-400 transition-colors`}>
+                <button onClick={handleRandomPlay} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} hover:scale-110 transition-transform`}>
                     <Shuffle className="w-3.5 h-3.5 md:w-4 h-4" />
                 </button>
-                <button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className="text-[8px] md:text-[10px] font-black text-white/20 hover:text-white/60 uppercase px-1">
+                <button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className={`text-[8px] md:text-[10px] font-black uppercase px-1 transition-colors ${theme.styles.textDim} hover:${theme.styles.textMain}`}>
                     {lang === 'zh' ? 'EN' : 'CN'}
                 </button>
                 <button onClick={() => loadChannels()} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} ${loading ? 'animate-spin' : ''}`}>
@@ -217,14 +217,14 @@ const App: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-3 md:p-10 scrollbar-thin">
             <div className="max-w-7xl mx-auto space-y-4 md:space-y-8">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar snap-x">
-                    <div className="flex items-center gap-2 shrink-0 pr-2 border-r border-white/10 mr-1">
-                        <Zap className="w-3.5 h-3.5 text-amber-400 opacity-60" />
+                    <div className="flex items-center gap-2 shrink-0 pr-2 border-r border-black/5 mr-1">
+                        <Zap className={`w-3.5 h-3.5 ${theme.styles.accentColor} opacity-60`} />
                     </div>
                     {DISCOVERY_TAGS.map(tag => (
                         <button 
                             key={tag} 
                             onClick={() => { setDiscoveryTag(tag); setSelectedCountry(GLOBAL_COUNTRY); }}
-                            className={`px-3 md:px-5 py-1.5 rounded-full text-[9px] md:text-[11px] font-black uppercase tracking-widest transition-all shrink-0 border snap-start ${discoveryTag === tag ? 'bg-cyan-500 text-black border-transparent' : `bg-white/5 ${theme.styles.textDim} border-white/5`}`}
+                            className={`px-3 md:px-5 py-1.5 rounded-full text-[9px] md:text-[11px] font-black uppercase tracking-widest transition-all shrink-0 border snap-start ${discoveryTag === tag ? theme.styles.buttonActive : `${theme.styles.button} ${theme.styles.border}`}`}
                         >
                             {tag}
                         </button>
@@ -250,9 +250,9 @@ const App: React.FC = () => {
                 </section>
 
                 <section className="space-y-4">
-                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                    <div className="flex items-center justify-between border-b border-black/5 pb-2">
                         <div className="flex items-center gap-2.5">
-                            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                            <Sparkles className={`w-3.5 h-3.5 ${theme.styles.accentColor}`} />
                             <h2 className={`text-[9px] md:text-sm font-black uppercase tracking-widest ${theme.styles.textMain}`}>
                                 {lang === 'zh' ? '链路波段扫描' : 'UPLINK SCAN'}
                             </h2>

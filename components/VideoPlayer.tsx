@@ -160,15 +160,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         )}
 
         {toast && (
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-cyan-500 text-black px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest z-[60] shadow-2xl animate-in zoom-in duration-300">
+            <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest z-[60] shadow-2xl animate-in zoom-in duration-300 ${theme.styles.buttonPrimary}`}>
                 {toast}
             </div>
         )}
 
         {loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 backdrop-blur-md z-30">
-                <Activity className="w-10 h-10 text-cyan-400 animate-spin" />
-                <span className="text-[9px] font-black uppercase tracking-widest text-cyan-400 mt-4 animate-pulse">{t.sync}</span>
+                <Activity className={`w-10 h-10 ${theme.styles.accentColor} animate-spin`} />
+                <span className={`text-[9px] font-black uppercase tracking-widest ${theme.styles.accentColor} mt-4 animate-pulse`}>{t.sync}</span>
             </div>
         )}
 
@@ -197,6 +197,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between">
+                    {/* 控制栏左侧：基础操作 */}
                     <div className="flex items-center gap-2 md:gap-10">
                         <button onClick={() => { isPlaying ? videoRef.current?.pause() : videoRef.current?.play(); setIsPlaying(!isPlaying); }} className="w-10 h-10 md:w-16 md:h-16 bg-white text-black rounded-2xl md:rounded-3xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl shrink-0">
                             {isPlaying ? <Square className="w-4 h-4 md:w-6 md:h-6 fill-current" /> : <Play className="w-4 h-4 md:w-6 md:h-6 fill-current ml-1" />}
@@ -214,7 +215,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 md:gap-3">
+                    {/* 控制栏右侧：功能集合 */}
+                    <div className="flex items-center gap-1.5 md:gap-3 bg-black/20 p-1 rounded-2xl md:rounded-3xl backdrop-blur-md">
                         <button onClick={onToggleFavorite} title="收藏" className={`p-2.5 md:p-4 rounded-xl md:rounded-2xl transition-all ${isFavorite ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
                             <Star className={`w-4 h-4 md:w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
                         </button>
