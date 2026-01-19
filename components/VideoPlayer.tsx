@@ -3,7 +3,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { 
   Play, RefreshCw, Square, Star, Volume2, VolumeX, 
-  Maximize, Globe, Camera, Circle, Activity, Shuffle, StopCircle
+  Maximize, Globe, Camera, Circle, Activity, Shuffle, StopCircle,
+  ExternalLink, Tv
 } from 'lucide-react';
 import { AppTheme, Channel, Country, Language } from '../types';
 
@@ -31,22 +32,67 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isPiP, setIsPiP] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const t = {
     zh: { 
         sync: '波段扫描中...', fail: '信号丢失', retry: '重置链路', live: 'LIVE',
-        snap: '快照已保存', recStart: '开始录制', recEnd: '视频已导出', err: '系统异常'
+        snap: '快照已保存', recStart: '开始录制', recEnd: '视频已导出', err: '系统异常',
+        pip: '小窗模式', cast: '投屏搜索中...'
     },
     en: { 
         sync: 'Syncing...', fail: 'No Signal', retry: 'Relink', live: 'LIVE',
-        snap: 'Snapshot Saved', recStart: 'Recording...', recEnd: 'Video Saved', err: 'Error'
+        snap: 'Snapshot Saved', recStart: 'Recording...', recEnd: 'Video Saved', err: 'Error',
+        pip: 'PiP Mode', cast: 'Searching Devices...'
     }
   }[lang];
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
+  };
+
+  // 小窗播放功能
+  const togglePiP = async () => {
+    if (!videoRef.current) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        setIsPiP(false);
+      } else {
+        await videoRef.current.requestPictureInPicture();
+        setIsPiP(true);
+        showToast(t.pip);
+      }
+    } catch (e) {
+      showToast(t.err);
+    }
+  };
+
+  // 投屏功能 (同WiFi) - 优化错误处理
+  const handleCast = async () => {
+    if (!videoRef.current) return;
+    try {
+      // 检查浏览器是否支持 Remote Playback API
+      const remote = (videoRef.current as any).remote;
+      if (remote) {
+        showToast(t.cast);
+        // 调用原生投屏选择器
+        await remote.prompt();
+      } else {
+        // 兼容性提醒 (Safari/Chrome 移动端等)
+        showToast(lang === 'zh' ? '当前环境不支持投屏' : 'Cast unsupported');
+      }
+    } catch (e: any) {
+      // 拦截用户关闭弹窗的异常 (DOMException: The prompt was dismissed)
+      if (e.name === 'NotAllowedError' || e.message?.includes('dismissed')) {
+        console.debug('User dismissed the cast prompt.');
+        return; // 静默处理，不报错
+      }
+      console.error('Cast fatal error:', e);
+      showToast(t.err);
+    }
   };
 
   const takeScreenshot = () => {
@@ -216,18 +262,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
 
                     {/* 控制栏右侧：功能集合 */}
-                    <div className="flex items-center gap-1.5 md:gap-3 bg-black/20 p-1 rounded-2xl md:rounded-3xl backdrop-blur-md">
-                        <button onClick={onToggleFavorite} title="收藏" className={`p-2.5 md:p-4 rounded-xl md:rounded-2xl transition-all ${isFavorite ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
-                            <Star className={`w-4 h-4 md:w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
+                    <div className="flex items-center gap-1 md:gap-2 bg-black/20 p-1 rounded-2xl md:rounded-3xl backdrop-blur-md">
+                        <button onClick={onToggleFavorite} title="收藏" className={`p-2 md:p-3 rounded-lg md:rounded-xl transition-all ${isFavorite ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                            <Star className={`w-3.5 h-3.5 md:w-4.5 h-4.5 ${isFavorite ? 'fill-current' : ''}`} />
                         </button>
-                        <button onClick={takeScreenshot} title="快照" className="p-2.5 md:p-4 bg-white/10 text-white hover:bg-white/20 rounded-xl md:rounded-2xl transition-all">
-                            <Camera className="w-4 h-4 md:w-5 h-5" />
+                        <button onClick={takeScreenshot} title="快照" className="p-2 md:p-3 bg-white/10 text-white hover:bg-white/20 rounded-lg md:rounded-xl transition-all">
+                            <Camera className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
                         </button>
-                        <button onClick={toggleRecording} title={isRecording ? "停止" : "录制"} className={`p-2.5 md:p-4 ${isRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'} rounded-xl md:rounded-2xl transition-all`}>
-                            {isRecording ? <StopCircle className="w-4 h-4 md:w-5 h-5" /> : <Circle className="w-4 h-4 md:w-5 h-5" />}
+                        <button onClick={toggleRecording} title={isRecording ? "停止" : "录制"} className={`p-2 md:p-3 ${isRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg md:rounded-xl transition-all`}>
+                            {isRecording ? <StopCircle className="w-3.5 h-3.5 md:w-4.5 h-4.5" /> : <Circle className="w-3.5 h-3.5 md:w-4.5 h-4.5" />}
                         </button>
-                        <button onClick={() => videoRef.current?.requestFullscreen()} title="全屏" className="p-2.5 md:p-4 bg-white/10 text-white hover:bg-white/20 rounded-xl md:rounded-2xl transition-all">
-                            <Maximize className="w-4 h-4 md:w-5 h-5" />
+                        <button onClick={togglePiP} title="画中画" className={`p-2 md:p-3 ${isPiP ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg md:rounded-xl transition-all`}>
+                            <ExternalLink className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
+                        </button>
+                        <button onClick={handleCast} title="投屏" className="p-2 md:p-3 bg-white/10 text-white hover:bg-white/20 rounded-lg md:rounded-xl transition-all">
+                            <Tv className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
+                        </button>
+                        <button onClick={() => videoRef.current?.requestFullscreen()} title="全屏" className="p-2 md:p-3 bg-white/10 text-white hover:bg-white/20 rounded-lg md:rounded-xl transition-all">
+                            <Maximize className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
                         </button>
                     </div>
                 </div>
