@@ -7,7 +7,7 @@ import { FavoritesBar } from './components/FavoritesBar';
 import { AiChatPet } from './components/AiChatPet';
 import { SettingsModal } from './components/SettingsModal';
 import { ImportModal } from './components/ImportModal';
-import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, fetchGlobalChannelsByCategory, getTimezone, GLOBAL_COUNTRY, searchChannels } from './services/iptvService';
+import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, fetchGlobalChannelsByCategory, getTimezone, GLOBAL_COUNTRY, searchChannels, filterPlayableChannels } from './services/iptvService';
 import { Country, Channel, AppTheme, Language } from './types';
 import { Menu, RefreshCw, Shuffle, Globe, Loader2, Sparkles, Clock, Zap, X, Search } from 'lucide-react';
 
@@ -110,6 +110,51 @@ const App: React.FC = () => {
   const [localTime, setLocalTime] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [cleanProgress, setCleanProgress] = useState<{ tested: number; total: number; validCount: number } | null>(null);
+  const [cleanSummary, setCleanSummary] = useState<string | null>(null);
+
+  const handleCleanChannels = useCallback(async (targetList?: Channel[]) => {
+    const listToClean = targetList || channels;
+    if (!listToClean || listToClean.length === 0) return;
+
+    setIsCleaning(true);
+    setCleanSummary(null);
+    setCleanProgress({ tested: 0, total: listToClean.length, validCount: 0 });
+
+    try {
+        const { validChannels, removedCount } = await filterPlayableChannels(listToClean, (tested, total, validCount) => {
+            setCleanProgress({ tested, total, validCount });
+        });
+
+        setChannels(validChannels);
+        setIsCleaning(false);
+        setCleanProgress(null);
+
+        if (removedCount > 0) {
+            const msg = lang === 'zh'
+                ? `链路测试完成：已为您自动净化并剔除 ${removedCount} 个不可播放频段`
+                : `Cleanup complete: Auto-removed ${removedCount} unplayable channels`;
+            setCleanSummary(msg);
+            setTimeout(() => setCleanSummary(null), 6000);
+
+            if (currentChannel && !validChannels.some(c => c.id === currentChannel.id)) {
+                if (validChannels.length > 0) {
+                    handleSelectChannel(validChannels[0]);
+                }
+            }
+        } else {
+            const msg = lang === 'zh'
+                ? `链路测试完成：当前 ${validChannels.length} 个波段信道全部可用`
+                : `Scan complete: All ${validChannels.length} channels are playable`;
+            setCleanSummary(msg);
+            setTimeout(() => setCleanSummary(null), 4000);
+        }
+    } catch (e) {
+        setIsCleaning(false);
+        setCleanProgress(null);
+    }
+  }, [channels, currentChannel, lang, handleSelectChannel]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -185,6 +230,8 @@ const App: React.FC = () => {
         const results = await searchChannels(searchQuery);
         setChannels(results);
         if (results.length > 0) handleSelectChannel(results[0]);
+        // Auto trigger background channel verification & cleaning after search
+        handleCleanChannels(results);
     } catch (e) {}
     setLoading(false);
   };
@@ -260,13 +307,18 @@ const App: React.FC = () => {
   };
 
   const handlePlaybackError = async () => {
+    if (!currentChannel) return;
+
+    const failedChannel = currentChannel;
+
+    // Remove failed channel from list immediately
+    setChannels(prev => prev.filter(c => c.id !== failedChannel.id));
+
     if (autoSwitchCount >= 4) {
       console.warn('Reached maximum auto switches (4) to prevent loop on completely dead connection.');
       return;
     }
-    if (!currentChannel) return;
 
-    const failedChannel = currentChannel;
     const baseName = failedChannel.name.split(' ')[0].toLowerCase();
     
     // 1. 在当前列表中寻找同名或类似名称的备用频道
@@ -317,11 +369,19 @@ const App: React.FC = () => {
         <header className={`px-4 md:px-8 py-2 md:py-4 flex items-center justify-between gap-4 border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
             <div className="flex items-center gap-3 min-w-0">
                 <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 opacity-80"><Menu className={`w-5 h-5 ${theme.styles.textMain}`} /></button>
-                <div className="hidden sm:flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-2.5 min-w-0">
                     <span className="text-xl md:text-2xl leading-none shrink-0">{selectedCountry?.flag}</span>
-                    <h1 className={`text-[11px] md:text-lg font-black uppercase tracking-tighter truncate ${theme.styles.textMain}`}>
-                        {isSearching ? (lang === 'zh' ? '搜索结果' : 'SEARCH RESULTS') : (discoveryTag || selectedCountry?.name)}
-                    </h1>
+                    <div className="flex flex-col min-w-0">
+                        <h1 className={`text-[11px] md:text-base font-black uppercase tracking-tighter truncate leading-tight ${theme.styles.textMain}`}>
+                            {isSearching ? (lang === 'zh' ? '搜索结果' : 'SEARCH RESULTS') : (discoveryTag || selectedCountry?.name)}
+                        </h1>
+                        {localTime && (
+                            <div className={`flex items-center gap-1.5 text-[9px] md:text-[10px] font-mono font-bold ${theme.styles.textDim}`}>
+                                <Clock className="w-3 h-3 text-cyan-400 animate-pulse shrink-0" />
+                                <span className="tracking-widest">{localTime}</span>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -405,6 +465,8 @@ const App: React.FC = () => {
                             <ChannelGrid 
                                 channels={channels} currentChannel={currentChannel} onSelectChannel={handleSelectChannel}
                                 loading={loading} mode={mode} theme={theme} favorites={favorites} onToggleFavorite={toggleFavorite}
+                                isCleaning={isCleaning} cleanProgress={cleanProgress} cleanSummary={cleanSummary}
+                                onCleanChannels={() => handleCleanChannels()} lang={lang}
                             />
                         </section>
 

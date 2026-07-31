@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Channel, AppTheme } from '../types';
-import { Tv, Search, Radio, Star, Play, Activity, Globe2, X, Image as ImageIcon } from 'lucide-react';
+import { Channel, AppTheme, Language } from '../types';
+import { Tv, Search, Radio, Star, Play, Activity, Globe2, X, ShieldCheck, RefreshCw, Loader2, CheckCircle2, Sparkles } from 'lucide-react';
 
 interface ChannelGridProps {
   channels: Channel[];
@@ -14,6 +14,11 @@ interface ChannelGridProps {
   onToggleFavorite: (channel: Channel) => void;
   externalFilter?: string;
   onExternalFilterChange?: (filter: string) => void;
+  isCleaning?: boolean;
+  cleanProgress?: { tested: number; total: number; validCount: number } | null;
+  cleanSummary?: string | null;
+  onCleanChannels?: () => void;
+  lang?: Language;
 }
 
 const LogoImage = ({ src, name, isActive, mode }: { src: string | null, name: string, isActive: boolean, mode: string }) => {
@@ -49,7 +54,8 @@ const LogoImage = ({ src, name, isActive, mode }: { src: string | null, name: st
 
 export const ChannelGrid: React.FC<ChannelGridProps> = ({ 
     channels, currentChannel, onSelectChannel, loading, mode, theme, favorites, onToggleFavorite,
-    externalFilter = '', onExternalFilterChange
+    externalFilter = '', onExternalFilterChange,
+    isCleaning = false, cleanProgress = null, cleanSummary = null, onCleanChannels, lang = 'zh'
 }) => {
   const [internalFilter, setInternalFilter] = useState('');
   const { styles } = theme;
@@ -75,25 +81,87 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
   }
 
   return (
-    <div className="space-y-4 md:space-y-8">
-      <div className={`flex items-center gap-3 md:gap-6 p-3 md:p-5 ${styles.input} ${styles.layoutShape} border ${styles.border} transition-all`}>
-        <Search className={`w-4 h-4 md:w-5 md:h-5 ${styles.textDim}`} />
-        <input 
-            type="text"
-            placeholder="搜索全球信道..."
-            className="bg-transparent border-none focus:outline-none text-[11px] md:text-[14px] font-bold w-full placeholder:opacity-30 uppercase tracking-widest"
-            value={internalFilter}
-            onChange={(e) => {
-                setInternalFilter(e.target.value);
-                if (onExternalFilterChange) onExternalFilterChange('');
-            }}
-        />
-        {(internalFilter || externalFilter) && (
-            <button onClick={() => { setInternalFilter(''); if (onExternalFilterChange) onExternalFilterChange(''); }} className="p-1 text-rose-500 rounded-full">
-                <X className="w-4 h-4" />
-            </button>
+    <div className="space-y-4 md:space-y-6">
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div className={`flex-1 flex items-center gap-3 md:gap-4 p-2.5 md:p-3.5 ${styles.input} ${styles.layoutShape} border ${styles.border} transition-all`}>
+          <Search className={`w-4 h-4 md:w-5 md:h-5 ${styles.textDim}`} />
+          <input 
+              type="text"
+              placeholder={lang === 'zh' ? "搜索频道名称或类别..." : "Search channels..."}
+              className="bg-transparent border-none focus:outline-none text-[11px] md:text-[13px] font-bold w-full placeholder:opacity-30 uppercase tracking-widest"
+              value={internalFilter}
+              onChange={(e) => {
+                  setInternalFilter(e.target.value);
+                  if (onExternalFilterChange) onExternalFilterChange('');
+              }}
+          />
+          {(internalFilter || externalFilter) && (
+              <button onClick={() => { setInternalFilter(''); if (onExternalFilterChange) onExternalFilterChange(''); }} className="p-1 text-rose-500 rounded-full">
+                  <X className="w-4 h-4" />
+              </button>
+          )}
+        </div>
+
+        {onCleanChannels && channels.length > 0 && (
+          <button
+            onClick={onCleanChannels}
+            disabled={isCleaning}
+            className={`
+              flex items-center justify-center gap-2 px-3.5 md:px-5 py-2.5 md:py-3.5 ${styles.layoutShape}
+              text-[10px] md:text-[11px] font-black uppercase tracking-wider transition-all shrink-0
+              ${isCleaning 
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 cursor-wait' 
+                : `${styles.button} border ${styles.border} hover:border-cyan-400 hover:text-cyan-400 active:scale-95`}
+            `}
+          >
+            {isCleaning ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 md:w-4 md:h-4 animate-spin text-cyan-400" />
+                <span>{lang === 'zh' ? '检测中...' : 'Checking...'}</span>
+              </>
+            ) : (
+              <>
+                <ShieldCheck className="w-3.5 h-3.5 md:w-4 md:h-4 text-cyan-400" />
+                <span>{lang === 'zh' ? '清理播放失败频道' : 'Clean Dead Channels'}</span>
+              </>
+            )}
+          </button>
         )}
       </div>
+
+      {/* Progress & Summary Bar */}
+      {isCleaning && cleanProgress && (
+        <div className={`p-3 md:p-4 ${styles.layoutShape} bg-cyan-950/40 border border-cyan-500/30 flex flex-col gap-2 text-cyan-300 animate-fade-in`}>
+          <div className="flex items-center justify-between text-[10px] md:text-xs font-bold uppercase tracking-wider">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+              <span>{lang === 'zh' ? '正在智能检测信号并净化列表...' : 'Checking stream status and purging dead links...'}</span>
+            </div>
+            <span className="font-mono">{cleanProgress.tested} / {cleanProgress.total}</span>
+          </div>
+          <div className="w-full bg-black/50 h-1.5 rounded-full overflow-hidden">
+            <div 
+              className="bg-cyan-400 h-full transition-all duration-200"
+              style={{ width: `${Math.min(100, Math.round((cleanProgress.tested / cleanProgress.total) * 100))}%` }}
+            />
+          </div>
+          <div className="text-[9px] font-mono text-cyan-400/70 text-right">
+            {lang === 'zh' ? `已保留 ${cleanProgress.validCount} 个正常波段` : `Valid streams: ${cleanProgress.validCount}`}
+          </div>
+        </div>
+      )}
+
+      {cleanSummary && !isCleaning && (
+        <div className={`p-3 md:p-4 ${styles.layoutShape} bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between text-emerald-300 animate-fade-in`}>
+          <div className="flex items-center gap-2.5 text-[10px] md:text-xs font-bold tracking-wide">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{cleanSummary}</span>
+          </div>
+          <span className="text-[9px] font-mono bg-emerald-500/20 px-2 py-0.5 rounded text-emerald-300">
+            {channels.length} {lang === 'zh' ? '个可用波段' : 'channels active'}
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2.5 md:gap-4">
           {filteredChannels.length > 0 ? filteredChannels.map(channel => {
@@ -141,3 +209,4 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
     </div>
   );
 };
+

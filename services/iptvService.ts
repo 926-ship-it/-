@@ -138,6 +138,78 @@ export const fetchCustomPlaylist = async (playlistUrl: string, refresh = false):
   }
 };
 
+export const verifyChannelStream = async (url: string, timeout = 3500): Promise<boolean> => {
+    if (!url) return false;
+    // HTTP urls will fail as Mixed Content on HTTPS origins
+    if (url.startsWith('http://')) return false;
+
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(url, { 
+            method: 'HEAD',
+            signal: controller.signal 
+        });
+        clearTimeout(id);
+        return response.ok || (response.status >= 200 && response.status < 400);
+    } catch (e) {
+        clearTimeout(id);
+        const controller2 = new AbortController();
+        const id2 = setTimeout(() => controller2.abort(), timeout);
+        try {
+            const response2 = await fetch(url, {
+                method: 'GET',
+                headers: { Range: 'bytes=0-100' },
+                signal: controller2.signal
+            });
+            clearTimeout(id2);
+            return response2.ok || (response2.status >= 200 && response2.status < 400);
+        } catch (err) {
+            clearTimeout(id2);
+            return false;
+        }
+    }
+};
+
+export const filterPlayableChannels = async (
+    channels: Channel[],
+    onProgress?: (tested: number, total: number, validCount: number) => void
+): Promise<{ validChannels: Channel[]; removedCount: number }> => {
+    if (!channels || channels.length === 0) {
+        return { validChannels: [], removedCount: 0 };
+    }
+
+    // Filter out HTTP streams instantly (blocked as mixed content in browser)
+    const secureChannels = channels.filter(c => c.url && c.url.startsWith('https://'));
+    
+    const validChannels: Channel[] = [];
+    const total = channels.length;
+    let tested = channels.length - secureChannels.length;
+
+    const BATCH_SIZE = 8;
+    for (let i = 0; i < secureChannels.length; i += BATCH_SIZE) {
+        const batch = secureChannels.slice(i, i + BATCH_SIZE);
+        const results = await Promise.all(
+            batch.map(async (ch) => {
+                const isPlayable = await verifyChannelStream(ch.url, 3000);
+                return isPlayable ? ch : null;
+            })
+        );
+
+        for (const res of results) {
+            if (res) validChannels.push(res);
+        }
+
+        tested += batch.length;
+        if (onProgress) {
+            onProgress(tested, total, validChannels.length);
+        }
+    }
+
+    const removedCount = total - validChannels.length;
+    return { validChannels, removedCount };
+};
+
 export const checkSignalStrength = async (url: string): Promise<'excellent' | 'good' | 'fair' | 'poor'> => {
     if (!url) return 'poor';
     
@@ -174,6 +246,10 @@ export const checkSignalStrength = async (url: string): Promise<'excellent' | 'g
 const fetchGlobalTopChannels = async (): Promise<Channel[]> => {
     // Verified 100% active live HTTPS streams with high compatibility
     return [
+        { id: 'bbc-world-news', name: 'BBC World News HD', logo: 'https://upload.wikimedia.org/wikipedia/commons/6/62/BBC_News_2019.svg', url: 'https://gpuserver3.tier1streams.com/BBC_WORLD_NEWS/index.m3u8', group: 'News' },
+        { id: 'bbc-earth', name: 'BBC Earth HD', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/BBC_Earth_logo.svg/512px-BBC_Earth_logo.svg.png', url: 'http://185.102.171.218/BBCEarth/index.m3u8', group: 'Documentary' },
+        { id: 'bbc-america', name: 'BBC America HD', logo: 'https://upload.wikimedia.org/wikipedia/commons/0/07/BBC_America_2021.svg', url: 'https://gpuserver3.tier1streams.com/BBC_AMERICA/index.m3u8', group: 'Entertainment' },
+        { id: 'bbc-lifestyle', name: 'BBC Lifestyle HD', logo: 'https://upload.wikimedia.org/wikipedia/commons/e/eb/BBC_Lifestyle_2019.svg', url: 'https://cdn4.skygo.mn/live/disk1/BBC_lifestyle/HLSv3-FTA/BBC_lifestyle.m3u8', group: 'Lifestyle' },
         { id: 'nhk-world', name: 'NHK World-Japan', logo: 'https://upload.wikimedia.org/wikipedia/commons/7/7b/NHK_World_Logo.svg', url: 'https://masterpl.hls.nhkworld.jp/hls/w/live/smarttv.m3u8', group: 'News' },
         { id: 'france-24-en', name: 'France 24 English', logo: 'https://upload.wikimedia.org/wikipedia/commons/2/20/France_24_Logo.svg', url: 'https://live.france24.com/hls/live/2037218-b/F24_EN_HI_HLS/master_5000.m3u8', group: 'News' },
         { id: 'al-jazeera-en', name: 'Al Jazeera English', logo: 'https://upload.wikimedia.org/wikipedia/commons/b/bb/Al_Jazeera_English_logo.svg', url: 'https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8', group: 'News' },
