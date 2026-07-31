@@ -50,13 +50,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImp
 
   if (!isOpen) return null;
 
-  const handleUrlImport = async () => {
-    if (!url.trim()) return;
+  const handlePresetSelect = (presetUrl: string) => {
+    setUrl(presetUrl);
+    fetchUrlContent(presetUrl);
+  };
+
+  const fetchUrlContent = async (targetUrl: string) => {
+    if (!targetUrl.trim()) return;
     setLoading(true);
     setStatus('idle');
     try {
-      // Proxy may be needed for CORS, but we try direct first
-      const response = await fetch(url);
+      const response = await fetch(targetUrl);
       if (!response.ok) throw new Error('Network error');
       const content = await response.text();
       onImport(content);
@@ -67,6 +71,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImp
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleUrlImport = () => {
+    fetchUrlContent(url);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -125,6 +133,39 @@ export const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImp
                       className={`w-full ${styles.input} ${styles.layoutShape} pl-12 pr-4 py-4 text-xs font-bold focus:ring-2 ring-cyan-500/20 outline-none transition-all`}
                     />
                  </div>
+
+                 <div className="space-y-2">
+                   <span className={`text-[10px] font-black uppercase tracking-wider ${styles.textDim}`}>
+                     {lang === 'zh' ? '热门开源推荐信号源:' : 'Featured Open Sources:'}
+                   </span>
+                   <div className="flex flex-wrap gap-2">
+                     <button
+                       type="button"
+                       onClick={() => handlePresetSelect('https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8')}
+                       disabled={loading}
+                       className={`px-3 py-1.5 ${styles.layoutShape} text-[10px] font-bold border ${styles.border} hover:border-cyan-500/50 hover:bg-cyan-500/10 transition-all flex items-center gap-1.5`}
+                     >
+                       📡 Free-TV 全球开源库
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => handlePresetSelect('https://iptv-org.github.io/iptv/index.m3u')}
+                       disabled={loading}
+                       className={`px-3 py-1.5 ${styles.layoutShape} text-[10px] font-bold border ${styles.border} hover:border-cyan-500/50 hover:bg-cyan-500/10 transition-all flex items-center gap-1.5`}
+                     >
+                       🌐 IPTV-Org 全球流库
+                     </button>
+                     <button
+                       type="button"
+                       onClick={() => handlePresetSelect('https://iptv-org.github.io/iptv/categories/news.m3u')}
+                       disabled={loading}
+                       className={`px-3 py-1.5 ${styles.layoutShape} text-[10px] font-bold border ${styles.border} hover:border-cyan-500/50 hover:bg-cyan-500/10 transition-all flex items-center gap-1.5`}
+                     >
+                       📰 IPTV-Org 新闻台
+                     </button>
+                   </div>
+                 </div>
+
                  <button 
                    onClick={handleUrlImport}
                    disabled={loading || !url.trim()}

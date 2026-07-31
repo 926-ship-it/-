@@ -7,9 +7,9 @@ import { FavoritesBar } from './components/FavoritesBar';
 import { AiChatPet } from './components/AiChatPet';
 import { SettingsModal } from './components/SettingsModal';
 import { ImportModal } from './components/ImportModal';
-import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, fetchGlobalChannelsByCategory, getTimezone, GLOBAL_COUNTRY } from './services/iptvService';
+import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, fetchGlobalChannelsByCategory, getTimezone, GLOBAL_COUNTRY, searchChannels } from './services/iptvService';
 import { Country, Channel, AppTheme, Language } from './types';
-import { Menu, RefreshCw, Shuffle, Globe, Loader2, Sparkles, Clock, Zap, X } from 'lucide-react';
+import { Menu, RefreshCw, Shuffle, Globe, Loader2, Sparkles, Clock, Zap, X, Search } from 'lucide-react';
 
 const THEMES: AppTheme[] = [
   {
@@ -88,6 +88,17 @@ const App: React.FC = () => {
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
+  const [autoSwitchCount, setAutoSwitchCount] = useState(0);
+
+  const handleSelectChannel = useCallback((channel: Channel, isAutoSwitch = false) => {
+    setCurrentChannel(channel);
+    if (isAutoSwitch) {
+      setAutoSwitchCount(prev => prev + 1);
+    } else {
+      setAutoSwitchCount(0);
+    }
+  }, []);
+
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mode, setMode] = useState<'tv' | 'radio'>('tv');
@@ -97,17 +108,26 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [localTime, setLocalTime] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
       if (!selectedCountry) return;
       const tz = getTimezone(selectedCountry.code);
       try {
+        const now = new Date();
+        // 确保 now 是有效日期
+        if (isNaN(now.getTime())) throw new Error('Invalid Date');
+        
         const time = new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
           timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-        }).format(new Date());
+        }).format(now);
         setLocalTime(time);
-      } catch (e) { setLocalTime('--:--:--'); }
+      } catch (e) { 
+        console.error('Time format error:', e);
+        setLocalTime('--:--:--'); 
+      }
     }, 1000);
     return () => clearInterval(timer);
   }, [selectedCountry, lang]);
@@ -139,7 +159,7 @@ const App: React.FC = () => {
             data = mode === 'tv' ? await fetchChannelsByCountry(selectedCountry.code) : await fetchRadioStations(selectedCountry.code);
         }
         setChannels(data);
-        if (data.length > 0 && !currentChannel) setCurrentChannel(data[0]);
+        if (data.length > 0 && !currentChannel) handleSelectChannel(data[0]);
     } catch (e) { setChannels([]); }
     setLoading(false);
   }, [selectedCountry, mode, discoveryTag]);
@@ -155,10 +175,119 @@ const App: React.FC = () => {
     });
   };
 
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setLoading(true);
+    setIsSearching(true);
+    setDiscoveryTag(null);
+    try {
+        const results = await searchChannels(searchQuery);
+        setChannels(results);
+        if (results.length > 0) handleSelectChannel(results[0]);
+    } catch (e) {}
+    setLoading(false);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+    setIsSearching(false);
+    loadChannels();
+  };
+
   const handleRandomPlay = () => {
     if (channels.length === 0) return;
     const randomIdx = Math.floor(Math.random() * channels.length);
-    setCurrentChannel(channels[randomIdx]);
+    handleSelectChannel(channels[randomIdx]);
+  };
+
+  const handleTryBackup = async (failedChannel: Channel) => {
+    // 1. 在当前列表中寻找同名或类似名称的频道
+    const baseName = failedChannel.name.split(' ')[0].toLowerCase();
+    const alternatives = channels.filter(c => 
+        c.id !== failedChannel.id && 
+        c.name.toLowerCase().includes(baseName)
+    );
+
+    if (alternatives.length > 0) {
+        // 随机选一个备用
+        const next = alternatives[Math.floor(Math.random() * alternatives.length)];
+        handleSelectChannel(next);
+    } else {
+        // 2. 如果当前列表没有，尝试全局搜索
+        setLoading(true);
+        try {
+            const results = await searchChannels(failedChannel.name);
+            const next = results.find(r => r.url !== failedChannel.url);
+            if (next) {
+                handleSelectChannel(next);
+            } else if (failedChannel.name.toUpperCase().includes('NBC')) {
+                // 3. 特殊处理 NBC：切换到稳定的 WNBC New York (Alt) 或 NBC News NOW
+                setSelectedCountry(GLOBAL_COUNTRY);
+                setDiscoveryTag(null);
+                setTimeout(() => {
+                    const nbcBackups = [
+                        {
+                            id: 'wnbc-ny-alt',
+                            name: 'WNBC New York (NBC Local)',
+                            logo: 'https://upload.wikimedia.org/wikipedia/commons/2/2f/NBC_News_Logo_2023.svg',
+                            url: 'https://fl61.moveonjoy.com/NY_New_York_NBC/index.m3u8',
+                            group: 'Local',
+                            type: 'tv' as const
+                        },
+                        {
+                            id: 'nbc-news',
+                            name: 'NBC News NOW',
+                            logo: 'https://upload.wikimedia.org/wikipedia/commons/2/2f/NBC_News_Logo_2023.svg',
+                            url: 'https://nbcnews-nbcnewsnow-1-us.wurl.tv/playlist.m3u8',
+                            group: 'News',
+                            type: 'tv' as const
+                        }
+                    ];
+                    // 排除掉当前失败的 URL
+                    const validBackups = nbcBackups.filter(b => b.url !== failedChannel.url);
+                    const next = validBackups.length > 0 ? validBackups[0] : nbcBackups[0];
+                    handleSelectChannel(next);
+                }, 500);
+            } else {
+                handleRandomPlay();
+            }
+        } catch (e) {
+            handleRandomPlay();
+        }
+        setLoading(false);
+    }
+  };
+
+  const handlePlaybackError = async () => {
+    if (autoSwitchCount >= 4) {
+      console.warn('Reached maximum auto switches (4) to prevent loop on completely dead connection.');
+      return;
+    }
+    if (!currentChannel) return;
+
+    const failedChannel = currentChannel;
+    const baseName = failedChannel.name.split(' ')[0].toLowerCase();
+    
+    // 1. 在当前列表中寻找同名或类似名称的备用频道
+    const alternatives = channels.filter(c => 
+        c.id !== failedChannel.id && 
+        c.name.toLowerCase().includes(baseName)
+    );
+
+    if (alternatives.length > 0) {
+        const next = alternatives[Math.floor(Math.random() * alternatives.length)];
+        handleSelectChannel(next, true);
+    } else {
+        // 2. 如果没有同名备用，尝试播放频道列表中的下一个频道
+        const currentIndex = channels.findIndex(c => c.id === failedChannel.id);
+        if (currentIndex !== -1 && currentIndex + 1 < channels.length) {
+            handleSelectChannel(channels[currentIndex + 1], true);
+        } else if (channels.length > 1) {
+            // 循环回到第一个
+            handleSelectChannel(channels[0], true);
+        }
+    }
   };
 
   if (!isReady) return (
@@ -178,29 +307,40 @@ const App: React.FC = () => {
         onSelectCountry={(c) => { setDiscoveryTag(null); setSelectedCountry(c); }}
         isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} mode={mode} onModeChange={setMode}
         themes={THEMES} currentTheme={theme} onThemeChange={setTheme}
-        favorites={favorites} onSelectFavorite={setCurrentChannel} 
+        favorites={favorites} onSelectFavorite={handleSelectChannel} 
         onImportM3U={() => setShowImport(true)} settings={{enableSound: true}}
         onToggleSound={() => {}} onOpenSettings={() => setShowSettings(true)}
         history={[]} lang={lang} reminders={[]} onDeleteReminder={()=>{}} onPlayReminder={()=>{}}
       />
 
       <main className="flex-1 flex flex-col h-full min-w-0 z-10 relative">
-        <header className={`px-4 md:px-8 py-2 md:py-4 flex items-center justify-between border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
+        <header className={`px-4 md:px-8 py-2 md:py-4 flex items-center justify-between gap-4 border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
             <div className="flex items-center gap-3 min-w-0">
                 <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 opacity-80"><Menu className={`w-5 h-5 ${theme.styles.textMain}`} /></button>
-                <div className="flex flex-col md:flex-row md:items-center gap-0 md:gap-5 min-w-0">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xl md:text-2xl leading-none">{selectedCountry?.flag}</span>
-                        <h1 className={`text-[11px] md:text-lg font-black uppercase tracking-tighter truncate ${theme.styles.textMain}`}>
-                            {discoveryTag || selectedCountry?.name}
-                        </h1>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                        <Clock className={`w-2.5 h-2.5 ${theme.styles.accentColor} opacity-70`} />
-                        <span className={`text-[9px] md:text-[11px] font-mono font-black tracking-widest ${theme.styles.textMain} opacity-80`}>{localTime}</span>
-                    </div>
+                <div className="hidden sm:flex items-center gap-2 min-w-0">
+                    <span className="text-xl md:text-2xl leading-none shrink-0">{selectedCountry?.flag}</span>
+                    <h1 className={`text-[11px] md:text-lg font-black uppercase tracking-tighter truncate ${theme.styles.textMain}`}>
+                        {isSearching ? (lang === 'zh' ? '搜索结果' : 'SEARCH RESULTS') : (discoveryTag || selectedCountry?.name)}
+                    </h1>
                 </div>
             </div>
+
+            <form onSubmit={handleSearch} className="relative flex-1 max-w-md">
+                <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={lang === 'zh' ? '搜索全球信道...' : 'Search global channels...'}
+                    className={`w-full pl-9 pr-4 py-1.5 rounded-full text-[11px] md:text-xs outline-none transition-all ${theme.styles.input} focus:ring-1 focus:ring-cyan-500/50`}
+                />
+                <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${theme.styles.textDim}`} />
+                {searchQuery && (
+                    <button type="button" onClick={clearSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-rose-400 hover:scale-110">
+                        <X className="w-3 h-3" />
+                    </button>
+                )}
+            </form>
+
             <div className="flex items-center gap-2 shrink-0">
                 <button onClick={handleRandomPlay} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} hover:scale-110 transition-transform`}>
                     <Shuffle className="w-3.5 h-3.5 md:w-4 h-4" />
@@ -234,39 +374,45 @@ const App: React.FC = () => {
                     )}
                 </div>
 
-                <section className="space-y-3">
-                    <div className="max-w-4xl lg:max-w-5xl mx-auto w-full">
+                {/* Split Layout: Left is Sticky Video + Favorites, Right is Channels + AI Chat */}
+                <div className="flex flex-col lg:flex-row gap-6 md:gap-8 items-start">
+                    {/* Left Sticky Column */}
+                    <div className="w-full lg:w-[55%] xl:w-[58%] lg:sticky lg:top-6 xl:top-10 space-y-4 shrink-0">
                         <VideoPlayer 
+                            key={currentChannel?.id || 'no-channel'}
                             channel={currentChannel} country={selectedCountry} theme={theme}
                             isFavorite={!!currentChannel && favorites.some(f => f.id === currentChannel.id)}
                             onToggleFavorite={() => currentChannel && toggleFavorite(currentChannel)}
                             lang={lang}
                             onRandom={handleRandomPlay}
+                            onTryBackup={handleTryBackup}
+                            onPlaybackError={handlePlaybackError}
                         />
+                        <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={handleSelectChannel} theme={theme} mode={mode} />
                     </div>
-                    <div className="max-w-4xl lg:max-w-5xl mx-auto w-full">
-                        <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={setCurrentChannel} theme={theme} mode={mode} />
-                    </div>
-                </section>
 
-                <section className="space-y-4">
-                    <div className="flex items-center justify-between border-b border-black/5 pb-2">
-                        <div className="flex items-center gap-2.5">
-                            <Sparkles className={`w-3.5 h-3.5 ${theme.styles.accentColor}`} />
-                            <h2 className={`text-[9px] md:text-sm font-black uppercase tracking-widest ${theme.styles.textMain}`}>
-                                {lang === 'zh' ? '链路波段扫描' : 'UPLINK SCAN'}
-                            </h2>
-                        </div>
-                    </div>
-                    <ChannelGrid 
-                        channels={channels} currentChannel={currentChannel} onSelectChannel={setCurrentChannel}
-                        loading={loading} mode={mode} theme={theme} favorites={favorites} onToggleFavorite={toggleFavorite}
-                    />
-                </section>
+                    {/* Right Scrollable Column */}
+                    <div className="flex-1 w-full space-y-6">
+                        <section className="space-y-4">
+                            <div className="flex items-center justify-between border-b border-black/5 pb-2">
+                                <div className="flex items-center gap-2.5">
+                                    <Sparkles className={`w-3.5 h-3.5 ${theme.styles.accentColor}`} />
+                                    <h2 className={`text-[9px] md:text-sm font-black uppercase tracking-widest ${theme.styles.textMain}`}>
+                                        {lang === 'zh' ? '链路波段扫描' : 'UPLINK SCAN'}
+                                    </h2>
+                                </div>
+                            </div>
+                            <ChannelGrid 
+                                channels={channels} currentChannel={currentChannel} onSelectChannel={handleSelectChannel}
+                                loading={loading} mode={mode} theme={theme} favorites={favorites} onToggleFavorite={toggleFavorite}
+                            />
+                        </section>
 
-                <section className="flex justify-end pt-8 pb-20 md:pb-24">
-                    <AiChatPet theme={theme} currentChannels={channels} onSelectChannel={setCurrentChannel} lang={lang} />
-                </section>
+                        <section className="flex justify-end pt-4 pb-20 md:pb-24">
+                            <AiChatPet theme={theme} currentChannels={channels} onSelectChannel={handleSelectChannel} lang={lang} />
+                        </section>
+                    </div>
+                </div>
             </div>
         </div>
       </main>

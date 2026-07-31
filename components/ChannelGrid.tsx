@@ -64,9 +64,9 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-3 md:gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 md:gap-6">
         {Array.from({ length: 16 }).map((_, i) => (
-            <div key={i} className={`h-28 md:h-40 bg-white/5 ${styles.layoutShape} animate-pulse relative overflow-hidden border border-white/5`}>
+            <div key={i} className={`h-28 md:h-36 bg-white/5 ${styles.layoutShape} animate-pulse relative overflow-hidden border border-white/5`}>
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/[0.03] to-transparent animate-shimmer"></div>
             </div>
         ))}
@@ -95,7 +95,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
         )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2.5 md:gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2.5 md:gap-4">
           {filteredChannels.length > 0 ? filteredChannels.map(channel => {
               const isActive = currentChannel?.id === channel.id;
               const isFav = favorites.some(f => f.id === channel.id);
@@ -105,7 +105,7 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
                       key={channel.id}
                       onClick={() => onSelectChannel(channel)}
                       className={`
-                        group relative p-3 md:p-6 flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer
+                        group relative p-2.5 md:p-4 flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer
                         border ${styles.layoutShape} active:scale-95 touch-manipulation
                         ${isActive 
                             ? `${styles.buttonActive} shadow-xl scale-[1.02] z-10 border-transparent` 

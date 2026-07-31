@@ -7,6 +7,7 @@ import {
   ExternalLink, Tv
 } from 'lucide-react';
 import { AppTheme, Channel, Country, Language } from '../types';
+import { checkSignalStrength } from '../services/iptvService';
 
 interface VideoPlayerProps {
   channel: Channel | null;
@@ -16,15 +17,19 @@ interface VideoPlayerProps {
   onToggleFavorite: () => void;
   lang: Language;
   onRandom?: () => void;
+  onTryBackup?: (channel: Channel) => void;
+  onPlaybackError?: () => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
-    channel, country, theme, isFavorite, onToggleFavorite, lang, onRandom
+    channel, country, theme, isFavorite, onToggleFavorite, lang, onRandom, onTryBackup, onPlaybackError
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const isLoadedRef = useRef(false);
+  const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -34,17 +39,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [isPiP, setIsPiP] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [signal, setSignal] = useState<'excellent' | 'good' | 'fair' | 'poor'>('good');
+  const [needsInteraction, setNeedsInteraction] = useState(false);
 
   const t = {
     zh: { 
         sync: '波段扫描中...', fail: '信号丢失', retry: '重置链路', live: 'LIVE',
         snap: '快照已保存', recStart: '开始录制', recEnd: '视频已导出', err: '系统异常',
-        pip: '小窗模式', cast: '投屏搜索中...'
+        pip: '小窗模式', cast: '投屏搜索中...', interaction: '点击开始播放'
     },
     en: { 
         sync: 'Syncing...', fail: 'No Signal', retry: 'Relink', live: 'LIVE',
         snap: 'Snapshot Saved', recStart: 'Recording...', recEnd: 'Video Saved', err: 'Error',
-        pip: 'PiP Mode', cast: 'Searching Devices...'
+        pip: 'PiP Mode', cast: 'Searching Devices...', interaction: 'Click to Play'
     }
   }[lang];
 
@@ -147,43 +154,182 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!channel?.url || !videoRef.current) return;
     setError(false); 
     setLoading(true);
+    isLoadedRef.current = false;
+    if (loadTimeoutRef.current) {
+        clearTimeout(loadTimeoutRef.current);
+    }
+    loadTimeoutRef.current = setTimeout(() => {
+        if (!isLoadedRef.current) {
+            console.warn('Playback load timeout, triggering auto-fallback');
+            setError(true);
+            setLoading(false);
+            showToast(lang === 'zh' ? '链路超时，正在扫描备用频段...' : 'Timeout, scanning alternative band...');
+            onPlaybackError?.();
+        }
+    }, 6500);
     
+    // 检查信号强度 (非阻塞)
+    checkSignalStrength(channel.url).then(setSignal).catch(() => setSignal('poor'));
+
     if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
     }
 
     const url = channel.url;
-    if (url.toLowerCase().includes('.m3u8') && Hls.isSupported()) {
+    
+    // 协议校验：仅支持 http/https
+    if (!url || (!url.startsWith('http') && !url.startsWith('https'))) {
+        setError(true);
+        setLoading(false);
+        showToast(lang === 'zh' ? '不支持的流协议' : 'Unsupported Protocol');
+        return;
+    }
+
+    const isHls = url.toLowerCase().includes('m3u8');
+    setNeedsInteraction(false);
+
+    if (isHls && Hls.isSupported()) {
         const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: true,
             manifestLoadingTimeOut: 10000,
-            levelLoadingTimeOut: 10000
+            levelLoadingTimeOut: 10000,
+            xhrSetup: (xhr) => {
+                xhr.withCredentials = false; // 避免跨域凭证问题
+            }
         });
         hlsRef.current = hls;
         hls.loadSource(url);
         hls.attachMedia(videoRef.current);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            isLoadedRef.current = true;
+            if (loadTimeoutRef.current) {
+                clearTimeout(loadTimeoutRef.current);
+                loadTimeoutRef.current = null;
+            }
             setLoading(false);
-            videoRef.current?.play().catch(() => setIsPlaying(false));
+            const playPromise = videoRef.current?.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    if (error.name === 'NotAllowedError') {
+                        // 尝试静音播放
+                        setIsMuted(true);
+                        videoRef.current?.play().catch(() => {
+                            setNeedsInteraction(true);
+                        });
+                    } else if (error.name !== 'AbortError') {
+                        console.error('Playback error:', error);
+                        setIsPlaying(false);
+                    }
+                });
+            }
             setIsPlaying(true);
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
             if (data.fatal) {
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
                 else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
-                else { setError(true); setLoading(false); }
+                else { 
+                    isLoadedRef.current = true;
+                    if (loadTimeoutRef.current) {
+                        clearTimeout(loadTimeoutRef.current);
+                        loadTimeoutRef.current = null;
+                    }
+                    setError(true); 
+                    setLoading(false); 
+                    onPlaybackError?.();
+                }
             }
         });
-    } else {
+    } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+        // 原生 HLS 支持 (如 Safari)
         videoRef.current.src = url;
-        videoRef.current.oncanplay = () => { setLoading(false); videoRef.current?.play().catch(() => {}); setIsPlaying(true); };
-        videoRef.current.onerror = () => { setError(true); setLoading(false); };
+        videoRef.current.oncanplay = () => { 
+            isLoadedRef.current = true;
+            if (loadTimeoutRef.current) {
+                clearTimeout(loadTimeoutRef.current);
+                loadTimeoutRef.current = null;
+            }
+            setLoading(false); 
+            videoRef.current?.play().catch((error) => {
+                if (error.name === 'NotAllowedError') {
+                    setIsMuted(true);
+                    videoRef.current?.play().catch(() => {
+                        setNeedsInteraction(true);
+                    });
+                }
+            });
+            setIsPlaying(true); 
+        };
+        videoRef.current.onerror = () => { 
+            isLoadedRef.current = true;
+            if (loadTimeoutRef.current) {
+                clearTimeout(loadTimeoutRef.current);
+                loadTimeoutRef.current = null;
+            }
+            setError(true); 
+            setLoading(false); 
+            onPlaybackError?.();
+        };
+    } else {
+        // 普通视频流或回退
+        videoRef.current.src = url;
+        videoRef.current.oncanplay = () => { 
+            isLoadedRef.current = true;
+            if (loadTimeoutRef.current) {
+                clearTimeout(loadTimeoutRef.current);
+                loadTimeoutRef.current = null;
+            }
+            setLoading(false); 
+            const playPromise = videoRef.current?.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    if (error.name === 'NotAllowedError') {
+                        setIsMuted(true);
+                        videoRef.current?.play().catch(() => {
+                            setNeedsInteraction(true);
+                        });
+                    } else if (error.name !== 'AbortError') {
+                        setIsPlaying(false);
+                    }
+                });
+            }
+            setIsPlaying(true); 
+        };
+        videoRef.current.onerror = (e: any) => { 
+            const error = videoRef.current?.error;
+            let msg = t.fail;
+            if (error?.code === 4) {
+                msg = lang === 'zh' ? '格式不支持或链路失效' : 'Unsupported Format';
+            }
+            console.error('Video element error:', error);
+            isLoadedRef.current = true;
+            if (loadTimeoutRef.current) {
+                clearTimeout(loadTimeoutRef.current);
+                loadTimeoutRef.current = null;
+            }
+            setError(true); 
+            setLoading(false);
+            showToast(msg);
+            onPlaybackError?.();
+        };
     }
   }, [channel]);
 
-  useEffect(() => { initPlayer(); }, [initPlayer]);
+  useEffect(() => { 
+    initPlayer(); 
+    return () => {
+      if (loadTimeoutRef.current) {
+        clearTimeout(loadTimeoutRef.current);
+        loadTimeoutRef.current = null;
+      }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [initPlayer]);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.volume = isMuted ? 0 : volume;
@@ -218,11 +364,57 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
         )}
 
+        {needsInteraction && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-30 cursor-pointer" onClick={() => {
+                videoRef.current?.play().then(() => {
+                    setNeedsInteraction(false);
+                    setIsPlaying(true);
+                }).catch(console.error);
+            }}>
+                <div className={`w-20 h-20 rounded-full flex items-center justify-center bg-white/10 border border-white/20 hover:bg-white/20 transition-all scale-110 shadow-2xl`}>
+                    <Play className="w-8 h-8 text-white fill-current ml-1" />
+                </div>
+                <span className="text-white font-black text-[10px] uppercase tracking-[0.3em] mt-6 animate-pulse">{t.interaction}</span>
+            </div>
+        )}
+
         {error && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-40 p-4">
                 <Globe className="w-10 h-10 text-rose-500 mb-4 opacity-20" />
                 <h3 className="text-white font-black uppercase text-xs tracking-widest">{t.fail}</h3>
-                <button onClick={initPlayer} className="mt-4 px-6 py-2 bg-white text-black text-[10px] font-black rounded-full hover:bg-cyan-400 transition-all uppercase tracking-widest shadow-xl">{t.retry}</button>
+                <p className="text-white/40 text-[9px] mt-1 text-center max-w-[200px] truncate">{channel?.url}</p>
+                
+                <div className="flex flex-col gap-2 mt-4 w-full max-w-[240px]">
+                    <button onClick={initPlayer} className="w-full px-6 py-2.5 bg-white text-black text-[10px] font-black rounded-xl hover:bg-cyan-400 transition-all uppercase tracking-widest shadow-xl flex items-center justify-center gap-2">
+                        <RefreshCw className="w-3.5 h-3.5" /> {t.retry}
+                    </button>
+                    
+                    {channel?.name?.toUpperCase().includes('NBC') ? (
+                        <button 
+                            onClick={() => {
+                                showToast(lang === 'zh' ? '正在连接 NBC 备用链路...' : 'Connecting NBC Backup...');
+                                if (onTryBackup && channel) {
+                                    onTryBackup(channel);
+                                } else if (onRandom) {
+                                    onRandom();
+                                }
+                            }}
+                            className="w-full px-6 py-2.5 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 text-[9px] font-black rounded-xl hover:bg-cyan-500/30 transition-all uppercase tracking-widest"
+                        >
+                            {lang === 'zh' ? '尝试 NBC 备用信道' : 'Try NBC Backup'}
+                        </button>
+                    ) : (
+                        <button 
+                            onClick={() => {
+                                if (onRandom) onRandom();
+                                showToast(lang === 'zh' ? '正在寻找备用节点...' : 'Finding alternative node...');
+                            }}
+                            className="w-full px-6 py-2.5 bg-white/5 text-white/40 border border-white/10 text-[9px] font-black rounded-xl hover:bg-white/10 transition-all uppercase tracking-widest"
+                        >
+                            {lang === 'zh' ? '寻找备用节点' : 'Find Alternative'}
+                        </button>
+                    )}
+                </div>
             </div>
         )}
 
@@ -233,10 +425,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         <h4 className="text-white font-black text-[12px] md:text-xl truncate uppercase italic tracking-tighter leading-none">{channel?.name}</h4>
                         <div className="flex items-center gap-2 mt-2">
                             <span className="flex h-1.5 w-1.5 relative shrink-0">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-rose-500"></span>
+                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${signal === 'excellent' ? 'bg-emerald-400' : signal === 'poor' ? 'bg-rose-400' : 'bg-amber-400'}`}></span>
+                                <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${signal === 'excellent' ? 'bg-emerald-500' : signal === 'poor' ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
                             </span>
-                            <span className="text-[7px] md:text-[10px] font-black text-rose-500 uppercase tracking-widest">{t.live}</span>
+                            <span className={`text-[7px] md:text-[10px] font-black uppercase tracking-widest ${signal === 'excellent' ? 'text-emerald-500' : signal === 'poor' ? 'text-rose-500' : 'text-amber-500'}`}>
+                                {signal === 'excellent' ? 'EXCELLENT SIGNAL' : signal === 'poor' ? 'WEAK SIGNAL' : 'STABLE SIGNAL'}
+                            </span>
                             <span className="text-[8px] md:text-[10px] text-white/40 uppercase font-black hidden md:block"> • {country?.name}</span>
                         </div>
                     </div>
