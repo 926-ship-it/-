@@ -94,13 +94,27 @@ export const fetchChannelsByCountry = async (countryCode: string, refresh = fals
     // 尝试获取最新的 M3U 列表，添加随机参数绕过缓存
     let code = countryCode.toLowerCase();
     if (code === 'gb') code = 'uk'; // Special handling: iptv-org country playlist for UK is uk.m3u, not gb.m3u
-    const url = `${PLAYLIST_BASE}/${code}.m3u${refresh ? `?t=${Date.now()}` : ''}`;
-    const response = await fetchWithTimeout(url, 10000);
-    if (!response.ok) return [];
-    const text = await response.text();
-    const channels = parseM3U(text)
-        .filter(c => c.url.startsWith('https://')) // Only allow HTTPS protocols to prevent Mixed Content blocking in browser
-        .map(c => ({ ...c, type: 'tv' as const }));
+
+    let remoteChannels: Channel[] = [];
+    try {
+      const url = `${PLAYLIST_BASE}/${code}.m3u${refresh ? `?t=${Date.now()}` : ''}`;
+      const response = await fetchWithTimeout(url, 10000);
+      if (response.ok) {
+        const text = await response.text();
+        remoteChannels = parseM3U(text).map(c => ({ ...c, type: 'tv' as const }));
+      }
+    } catch (e) {}
+
+    if (code === 'jp') {
+      const localJp = parseM3U(JAPAN_M3U_PLAYLIST);
+      for (const ch of localJp) {
+        if (!remoteChannels.some(r => r.name === ch.name || r.url === ch.url)) {
+          remoteChannels.unshift(ch);
+        }
+      }
+    }
+
+    const channels = remoteChannels.filter(c => c.url && c.url.startsWith('https://'));
     
     // 简单过滤：优先保留包含 HD, 1080p, 720p 的频道
     return channels.sort((a, b) => {
@@ -111,6 +125,9 @@ export const fetchChannelsByCountry = async (countryCode: string, refresh = fals
         return 0;
     });
   } catch (error) { 
+    if (countryCode.toLowerCase() === 'jp') {
+      return parseM3U(JAPAN_M3U_PLAYLIST).filter(c => c.url && c.url.startsWith('https://'));
+    }
     return []; 
   }
 };
@@ -151,23 +168,39 @@ export const verifyChannelStream = async (url: string, timeout = 3500): Promise<
             signal: controller.signal 
         });
         clearTimeout(id);
-        return response.ok || (response.status >= 200 && response.status < 400);
+        if (response.ok || (response.status >= 200 && response.status < 400)) return true;
     } catch (e) {
         clearTimeout(id);
-        const controller2 = new AbortController();
-        const id2 = setTimeout(() => controller2.abort(), timeout);
-        try {
-            const response2 = await fetch(url, {
-                method: 'GET',
-                headers: { Range: 'bytes=0-100' },
-                signal: controller2.signal
-            });
-            clearTimeout(id2);
-            return response2.ok || (response2.status >= 200 && response2.status < 400);
-        } catch (err) {
-            clearTimeout(id2);
-            return false;
-        }
+    }
+
+    const controller2 = new AbortController();
+    const id2 = setTimeout(() => controller2.abort(), timeout);
+    try {
+        const response2 = await fetch(url, {
+            method: 'GET',
+            headers: { Range: 'bytes=0-100' },
+            signal: controller2.signal
+        });
+        clearTimeout(id2);
+        if (response2.ok || (response2.status >= 200 && response2.status < 400)) return true;
+    } catch (err) {
+        clearTimeout(id2);
+    }
+
+    // Fallback mode: 'no-cors' to verify reachability for live streams lacking CORS headers
+    const controller3 = new AbortController();
+    const id3 = setTimeout(() => controller3.abort(), timeout);
+    try {
+        const response3 = await fetch(url, {
+            method: 'GET',
+            mode: 'no-cors',
+            signal: controller3.signal
+        });
+        clearTimeout(id3);
+        return response3.type === 'opaque' || response3.ok;
+    } catch (err) {
+        clearTimeout(id3);
+        return false;
     }
 };
 
@@ -377,22 +410,136 @@ export const fetchGlobalChannelsByCategory = async (category: string): Promise<C
     } catch (e) { return []; }
 };
 
+export const JAPAN_M3U_PLAYLIST = `#EXTM3U
+#EXTINF:-1 tvg-name="TOKYO MX チャンネル" tvg-logo="https://channel.rakuten.co.jp/service/img/logo/chlogo-with-number/108_mx.png" tvg-id="" tvg-chno="CH 108" tvg-country="JP" group-title="日本 / Japan",TOKYO MX チャンネル
+https://cdn-uw2-prod.tsv2.amagi.tv/linear/amg01287-rakutentvjapan-tokyomx-cmaf-rakutenjp/playlist.m3u8
+#EXTINF:-1 tvg-name="ショップチャンネル" tvg-logo="https://i.imgur.com/CCMAF7W.png" tvg-id="ShopChannel.jp" tvg-chno="CS055" tvg-country="JP" group-title="日本 / Japan",ショップチャンネル
+https://stream3.shopch.jp/HLS/master.m3u8
+#EXTINF:-1 tvg-name="QVC" tvg-logo="https://i.imgur.com/FznYA39.png" tvg-id="QVC.jp" tvg-chno="CS161" tvg-country="JP" group-title="日本 / Japan",QVC
+https://cdn-live1.qvc.jp/iPhone/1501/1501.m3u8
+#EXTINF:-1 tvg-name="NHK WORLD JAPAN" tvg-logo="https://i.imgur.com/Mhw1Ihk.png" tvg-id="NHKWorldJapan.jp" tvg-chno="JCOM307" tvg-country="JP" group-title="日本 / Japan",NHK WORLD JAPAN
+https://master.nhkworld.jp/nhkworld-tv/playlist/live.m3u8
+#EXTINF:-1 tvg-name="ウェザーニュースLiVE" tvg-logo="https://channel.rakuten.co.jp/service/img/logo/chlogo-with-number/106_whethernews.png" tvg-id="rch_45" tvg-chno="CH 106" tvg-country="JP" group-title="日本 / Japan",ウェザーニュースLiVE
+https://rch01e-alive-hls.akamaized.net/38fb45b25cdb05a1/out/v1/4e907bfabc684a1dae10df8431a84d21/index.m3u8
+#EXTINF:-1 tvg-name="NHK総合 (東京)" tvg-logo="https://i.imgur.com/fAZ2BEZ.png" tvg-id="JOAKDTV.jp" tvg-chno="D011" tvg-country="JP" group-title="日本 / Japan",NHK総合 (東京)
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS291&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="NHK Eテレ（東京）" tvg-logo="https://i.imgur.com/WxtftlO.png" tvg-id="JOABDTV.jp" tvg-chno="D021" tvg-country="JP" group-title="日本 / Japan",NHK Eテレ（東京）
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS292&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="日本テレビ" tvg-logo="https://i.imgur.com/ecbM7QS.png" tvg-id="JOAXDTV.jp" tvg-chno="D041" tvg-country="JP" group-title="日本 / Japan",日本テレビ
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS294&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="テレビ朝日" tvg-logo="https://i.imgur.com/5XnMfcR.png" tvg-id="JOEXDTV.jp" tvg-chno="D051" tvg-country="JP" group-title="日本 / Japan",テレビ朝日
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS295&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="TBSテレビ" tvg-logo="https://i.imgur.com/jIZ9TlO.png" tvg-id="JORXDTV.jp" tvg-chno="D061" tvg-country="JP" group-title="日本 / Japan",TBSテレビ
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS296&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="テレビ東京" tvg-logo="https://i.imgur.com/U8jBxEi.png" tvg-id="JOTXDTV.jp" tvg-chno="D071" tvg-country="JP" group-title="日本 / Japan",テレビ東京
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS297&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="フジテレビ" tvg-logo="https://i.imgur.com/epJYc7P.png" tvg-id="JOCXDTV.jp" tvg-chno="D081" tvg-country="JP" group-title="日本 / Japan",フジテレビ
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS298&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="NHK BS" tvg-logo="https://i.imgur.com/t0uZcSR.png" tvg-id="NHKBS.jp" tvg-chno="BS101" tvg-country="JP" group-title="日本 / Japan",NHK BS
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS101&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="NHK BSP4K" tvg-logo="https://i.imgur.com/uvPpFo5.png" tvg-id="NHKBSP4K.jp" tvg-chno="BS4K101" tvg-country="JP" group-title="日本 / Japan",NHK BSP4K
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS103&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="BS日テレ" tvg-logo="https://i.imgur.com/26ATUNc.png" tvg-id="BSNipponTV.jp" tvg-chno="BS141" tvg-country="JP" group-title="日本 / Japan",BS日テレ
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS141&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="BS朝日" tvg-logo="https://i.imgur.com/Cl68ZMA.png" tvg-id="BSAsahi.jp" tvg-chno="BS151" tvg-country="JP" group-title="日本 / Japan",BS朝日
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS151&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="BS-TBS" tvg-logo="https://i.imgur.com/BSt9UG2.png" tvg-id="BSTBS.jp" tvg-chno="BS161" tvg-country="JP" group-title="日本 / Japan",BS-TBS
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS161&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="BSテレ東" tvg-logo="https://i.imgur.com/LsQlNcz.png" tvg-id="BSTVTokyo.jp" tvg-chno="BS171" tvg-country="JP" group-title="日本 / Japan",BSテレ東
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS171&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="BSフジ" tvg-logo="https://i.imgur.com/N4xeDxJ.png" tvg-id="BSFuji.jp" tvg-chno="BS181" tvg-country="JP" group-title="日本 / Japan",BSフジ
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS181&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="WOWOWプライム" tvg-logo="https://www.lyngsat.com/logo/tv/ww/wowow_prime.png" tvg-id="WOWOWPrime.jp" tvg-chno="BS191" tvg-country="JP" group-title="日本 / Japan",WOWOWプライム
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS191&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="WOWOWライブ" tvg-logo="https://www.lyngsat.com/logo/tv/ww/wowow_live.png" tvg-id="WOWOWLive.jp" tvg-chno="BS192" tvg-country="JP" group-title="日本 / Japan",WOWOWライブ
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS192&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="WOWOWシネマ" tvg-logo="https://www.lyngsat.com/logo/tv/ww/wowow_cinema.png" tvg-id="WOWOWCinema.jp" tvg-chno="BS193" tvg-country="JP" group-title="日本 / Japan",WOWOWシネマ
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS193&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="BS10" tvg-logo="https://i.imgur.com/KPZiuHl.png" tvg-id="jcom_120_110_4" tvg-chno="BS200" tvg-country="JP" group-title="日本 / Japan",BS10
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS263&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="BS10スターチャンネル" tvg-logo="https://i.imgur.com/SN0ED0U.png" tvg-id="jcom_120_200_4" tvg-chno="BS201" tvg-country="JP" group-title="日本 / Japan",BS10スターチャンネル
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS200&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="アニマックス" tvg-logo="https://i.imgur.com/jO0qUvj.png" tvg-id="AnimaxAsia.sg@Japan" tvg-chno="BS236" tvg-country="JP" group-title="日本 / Japan",アニマックス
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS236&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="J SPORTS 1" tvg-logo="https://www.starcat.co.jp/ch/upload/channel/69/jsports1_logo.jpg" tvg-id="JSPORTS1.jp" tvg-chno="BS242" tvg-country="JP" group-title="日本 / Japan",J SPORTS 1
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS242&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="J SPORTS 2" tvg-logo="https://www.starcat.co.jp/ch/upload/channel/70/jsports2_logo.jpg" tvg-id="JSPORTS2.jp" tvg-chno="BS243" tvg-country="JP" group-title="日本 / Japan",J SPORTS 2
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS243&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="J SPORTS 3" tvg-logo="https://www.starcat.co.jp/ch/upload/channel/71/jsports3_logo.jpg" tvg-id="JSPORTS3.jp" tvg-chno="BS244" tvg-country="JP" group-title="日本 / Japan",J SPORTS 3
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS244&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="J SPORTS 4" tvg-logo="https://www.starcat.co.jp/ch/upload/channel/74/jsports4_logo.jpg" tvg-id="JSPORTS4.jp" tvg-chno="BS245" tvg-country="JP" group-title="日本 / Japan",J SPORTS 4
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS245&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="釣りビジョン" tvg-logo="https://i.imgur.com/Yc7JvSK.png" tvg-id="FishingVision.jp" tvg-chno="BS251" tvg-country="JP" group-title="日本 / Japan",釣りビジョン
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS251&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="日本映画専門チャンネル" tvg-logo="https://i.imgur.com/HdC3Hdc.png" tvg-id="NihonEigaSenmonChannel.jp" tvg-chno="BS255" tvg-country="JP" group-title="日本 / Japan",日本映画専門チャンネル
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS255&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="東映チャンネル" tvg-logo="https://www.lyngsat-logo.com/logo/tv/tt/toei_channel.png" tvg-id="ToeiChannel.jp" tvg-chno="CS218" tvg-country="JP" group-title="日本 / Japan",東映チャンネル
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS218&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="チャンネルNECO" tvg-logo="https://www.lyngsat-logo.com/logo/tv/cc/channel-neco-jp.png" tvg-id="ChannelNECO.jp" tvg-chno="CS223" tvg-country="JP" group-title="日本 / Japan",チャンネルNECO
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS223&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="ムービープラス" tvg-logo="https://www.lyngsat-logo.com/logo/tv/mm/movie_plus_jp.png" tvg-id="MoviePlus.jp" tvg-chno="CS240" tvg-country="JP" group-title="日本 / Japan",ムービープラス
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS240&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="GAORA" tvg-logo="https://i.imgur.com/Myh0PWD.png" tvg-id="GAORASPORTS.jp" tvg-chno="CS254" tvg-country="JP" group-title="日本 / Japan",GAORA
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS254&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="日テレジータス" tvg-logo="https://i.imgur.com/xq1VG0E.png" tvg-id="NitteleGPlus.jp" tvg-chno="CS257" tvg-country="JP" group-title="日本 / Japan",日テレジータス
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS257&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="ゴルフネットワーク" tvg-logo="https://i.imgur.com/EVd8Vvp.png" tvg-id="GolfNetwork.jp" tvg-chno="CS262" tvg-country="JP" group-title="日本 / Japan",ゴルフネットワーク
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS262&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="時代劇専門チャンネル" tvg-logo="https://www.lyngsat-logo.com/logo/tv/jj/jidaigeki.png" tvg-id="JidaigekiSenmonChannel.jp" tvg-chno="CS292" tvg-country="JP" group-title="日本 / Japan",時代劇専門チャンネル
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS292&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="ファミリー劇場" tvg-logo="https://i.postimg.cc/k5fXKzj3/o023302751417597653027.jpg" tvg-id="FamilyGekijyo.jp" tvg-chno="CS293" tvg-country="JP" group-title="日本 / Japan",ファミリー劇場
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS293&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="ホームドラマチャンネル" tvg-logo="https://www.lyngsat-logo.com/logo/tv/hh/home-drama-channelpng-jp.png" tvg-id="HomeDramaChannel.jp" tvg-chno="CS294" tvg-country="JP" group-title="日本 / Japan",ホームドラマチャンネル
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS294&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="チャンネル銀河" tvg-logo="https://www.lyngsat-logo.com/logo/tv/cc/channel_ginga.png" tvg-id="ChannelGinga.jp" tvg-chno="CS305" tvg-country="JP" group-title="日本 / Japan",チャンネル銀河
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS305&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="スーパー！ドラマTV" tvg-logo="https://www.lyngsat-logo.com/logo/tv/ss/super_drama_tv.png" tvg-id="SuperDramaTV.jp" tvg-chno="CS310" tvg-country="JP" group-title="日本 / Japan",スーパー！ドラマTV
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS310&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="アクションチャンネル" tvg-logo="https://i.imgur.com/K0YyPwC.png" tvg-id="AXN.jp" tvg-chno="CS311" tvg-country="JP" group-title="日本 / Japan",アクションチャンネル
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS311&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="Dlife" tvg-logo="https://i.imgur.com/6gJZHPv.png" tvg-id="FOX.jp" tvg-chno="CS312" tvg-country="JP" group-title="日本 / Japan",Dlife
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS312&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="LaLa TV" tvg-logo="https://www.lyngsat-logo.com/logo/tv/ll/lala_tv.png" tvg-id="LaLaTV.jp" tvg-chno="CS314" tvg-country="JP" group-title="日本 / Japan",LaLa TV
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS314&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="Mnet" tvg-logo="https://www.lyngsat.com/logo/tv/mm/m_net_jp.png" tvg-id="MnetJapan.jp" tvg-chno="CS318" tvg-country="JP" group-title="日本 / Japan",Mnet
+https://stream01.willfonk.com/live_playlist.m3u8?cid=BS241&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="Music ON TV!（エムオン）" tvg-logo="https://www.lyngsat-logo.com/logo/tv/mm/music_on_tv.png" tvg-id="MUSICONTV.jp" tvg-chno="CS325" tvg-country="JP" group-title="日本 / Japan",Music ON TV!（エムオン）
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS325&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="歌謡ポップスチャンネル" tvg-logo="https://www.lyngsat-logo.com/logo/tv/kk/kayo-pops-jp.png" tvg-id="KayoPops.jp" tvg-chno="CS329" tvg-country="JP" group-title="日本 / Japan",歌謡ポップスチャンネル
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS329&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="キッズステーション" tvg-logo="https://www.lyngsat-logo.com/logo/tv/kk/kidsstation.png" tvg-id="KidsStation.jp" tvg-chno="CS330" tvg-country="JP" group-title="日本 / Japan",キッズステーション
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS330&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="日テレNEWS24" tvg-logo="https://i.imgur.com/jtSYegn.png" tvg-id="NTVNEWS24.jp" tvg-chno="CS349" tvg-country="JP" group-title="日本 / Japan",日テレNEWS24
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS349&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+#EXTINF:-1 tvg-name="囲碁・将棋チャンネル" tvg-logo="https://www.lyngsat-logo.com/logo/tv/ii/igoshogi.png" tvg-id="IgoShogiChannel.jp" tvg-chno="CS363" tvg-country="JP" group-title="日本 / Japan",囲碁・将棋チャンネル
+https://stream01.willfonk.com/live_playlist.m3u8?cid=CS363&r=FHD&ccode=JP&m=d0:20:20:04:35:cc&t=0d6938cb3dcf4b79848bc1753a59daf1
+`;
+
 export const parseM3U = (content: string): Channel[] => {
+  if (!content) return [];
   const lines = content.split('\n');
   const channels: Channel[] = [];
   let current: Partial<Channel> = {};
   for (let line of lines) {
     line = line.trim();
     if (line.startsWith('#EXTINF:')) {
-      const name = line.substring(line.lastIndexOf(',') + 1).trim();
+      let name = line.substring(line.lastIndexOf(',') + 1).trim();
+      if (!name) {
+        name = line.match(/tvg-name="([^"]*)"/)?.[1] || 'Channel';
+      }
       const logo = line.match(/tvg-logo="([^"]*)"/)?.[1] || null;
-      const group = line.match(/group-title="([^"]*)"/)?.[1] || 'Public';
+      const group = line.match(/group-title="([^"]*)"/)?.[1] || 'General';
       current = { name, logo, group };
     } else if (line && !line.startsWith('#')) {
-      if (current.name) {
-        channels.push({ ...current as Channel, id: Math.random().toString(36).substr(2, 9), url: line });
-        current = {};
-      }
+      channels.push({
+        id: Math.random().toString(36).substring(2, 11),
+        name: current.name || 'Live Channel',
+        logo: current.logo || null,
+        group: current.group || 'General',
+        url: line,
+        type: 'tv'
+      });
+      current = {};
     }
   }
   return channels;

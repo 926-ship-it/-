@@ -60,6 +60,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImp
     setLoading(true);
     setStatus('idle');
     try {
+      const trimmed = targetUrl.trim();
+      // If user pasted raw M3U text content directly
+      if (trimmed.includes('#EXTM3U') || trimmed.includes('#EXTINF')) {
+        onImport(trimmed);
+        setStatus('success');
+        setTimeout(onClose, 1000);
+        return;
+      }
+
       const response = await fetch(targetUrl);
       if (!response.ok) throw new Error('Network error');
       const content = await response.text();

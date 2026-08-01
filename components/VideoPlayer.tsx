@@ -4,10 +4,12 @@ import Hls from 'hls.js';
 import { 
   Play, RefreshCw, Square, Star, Volume2, VolumeX, 
   Maximize, Globe, Camera, Circle, Activity, Shuffle, StopCircle,
-  ExternalLink, Tv
+  ExternalLink, Tv, Cast, Wifi, ShieldCheck
 } from 'lucide-react';
 import { AppTheme, Channel, Country, Language } from '../types';
 import { checkSignalStrength } from '../services/iptvService';
+import { CastModal } from './CastModal';
+import { SimulatedMonitorOverlay } from './SimulatedMonitorOverlay';
 
 interface VideoPlayerProps {
   channel: Channel | null;
@@ -41,6 +43,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [toast, setToast] = useState<string | null>(null);
   const [signal, setSignal] = useState<'excellent' | 'good' | 'fair' | 'poor'>('good');
   const [needsInteraction, setNeedsInteraction] = useState(false);
+
+  // Cast state
+  const [isCastModalOpen, setIsCastModalOpen] = useState(false);
+  const [isCasting, setIsCasting] = useState(false);
+  const [activeReceiverName, setActiveReceiverName] = useState<string | null>(null);
 
   const t = {
     zh: { 
@@ -77,29 +84,37 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  // 投屏功能 (同WiFi) - 优化错误处理
-  const handleCast = async () => {
+  // 唤起原生 AirPlay / Chromecast 选择器
+  const triggerNativeCast = async () => {
     if (!videoRef.current) return;
     try {
-      // 检查浏览器是否支持 Remote Playback API
       const remote = (videoRef.current as any).remote;
       if (remote) {
         showToast(t.cast);
-        // 调用原生投屏选择器
         await remote.prompt();
       } else {
-        // 兼容性提醒 (Safari/Chrome 移动端等)
-        showToast(lang === 'zh' ? '当前环境不支持投屏' : 'Cast unsupported');
+        showToast(lang === 'zh' ? '浏览器未检测到原生 AirPlay/Chromecast' : 'Native Cast unavailable');
       }
     } catch (e: any) {
-      // 拦截用户关闭弹窗的异常 (DOMException: The prompt was dismissed)
-      if (e.name === 'NotAllowedError' || e.message?.includes('dismissed')) {
-        console.debug('User dismissed the cast prompt.');
-        return; // 静默处理，不报错
-      }
-      console.error('Cast fatal error:', e);
+      if (e.name === 'NotAllowedError' || e.message?.includes('dismissed')) return;
       showToast(t.err);
     }
+  };
+
+  const startSimulatedCast = (receiverName: string) => {
+    setIsCasting(true);
+    setActiveReceiverName(receiverName);
+    showToast(lang === 'zh' ? `已成功投屏至 ${receiverName}` : `Casting to ${receiverName}`);
+  };
+
+  const stopCast = () => {
+    setIsCasting(false);
+    setActiveReceiverName(null);
+    showToast(lang === 'zh' ? '已断开投屏' : 'Cast disconnected');
+  };
+
+  const handleCastClick = () => {
+    setIsCastModalOpen(true);
   };
 
   const takeScreenshot = () => {
@@ -351,6 +366,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
         )}
 
+        {isCasting && (
+            <div className="absolute top-4 left-4 z-40 flex items-center gap-2.5 bg-black/80 px-3.5 py-1.5 rounded-full border border-cyan-500/50 text-cyan-400 backdrop-blur-md animate-fade-in shadow-xl">
+                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-wider text-white">
+                    {lang === 'zh' ? '正在投屏至:' : 'CASTING TO:'} <span className="text-cyan-400">{activeReceiverName}</span>
+                </span>
+                <button 
+                    onClick={stopCast}
+                    className="ml-1 text-[9px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/40 border border-rose-500/30 uppercase"
+                >
+                    {lang === 'zh' ? '断开' : 'Stop'}
+                </button>
+            </div>
+        )}
+
         {toast && (
             <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-widest z-[60] shadow-2xl animate-in zoom-in duration-300 ${theme.styles.buttonPrimary}`}>
                 {toast}
@@ -469,7 +499,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         <button onClick={togglePiP} title="画中画" className={`p-2 md:p-3 ${isPiP ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg md:rounded-xl transition-all`}>
                             <ExternalLink className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
                         </button>
-                        <button onClick={handleCast} title="投屏" className="p-2 md:p-3 bg-white/10 text-white hover:bg-white/20 rounded-lg md:rounded-xl transition-all">
+                        <button 
+                            onClick={handleCastClick} 
+                            title={lang === 'zh' ? '投屏 / 外接显示器' : 'Cast / External Display'} 
+                            className={`p-2 md:p-3 ${isCasting ? 'bg-cyan-400 text-black shadow-lg shadow-cyan-400/30 animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg md:rounded-xl transition-all`}
+                        >
                             <Tv className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
                         </button>
                         <button onClick={() => videoRef.current?.requestFullscreen()} title="全屏" className="p-2 md:p-3 bg-white/10 text-white hover:bg-white/20 rounded-lg md:rounded-xl transition-all">
@@ -480,6 +514,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
         </div>
       </div>
+
+      {/* Cast Modal */}
+      <CastModal
+        isOpen={isCastModalOpen}
+        onClose={() => setIsCastModalOpen(false)}
+        channel={channel}
+        theme={theme}
+        lang={lang}
+        onStartSimulatedCast={startSimulatedCast}
+        onTriggerNativeCast={triggerNativeCast}
+        isCasting={isCasting}
+        activeReceiverName={activeReceiverName}
+        onStopCast={stopCast}
+      />
+
+      {/* Simulated External Display Monitor Screen Overlay */}
+      {isCasting && (
+        <SimulatedMonitorOverlay
+          channel={channel}
+          theme={theme}
+          lang={lang}
+          receiverName={activeReceiverName || ''}
+          onClose={stopCast}
+        />
+      )}
     </div>
   );
 };
