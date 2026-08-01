@@ -165,6 +165,42 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
+  const safePlay = useCallback(async (el: HTMLVideoElement) => {
+    try {
+      const promise = el.play();
+      if (promise !== undefined) {
+        await promise;
+        setIsPlaying(true);
+      }
+    } catch (error: any) {
+      const isAbort =
+        error?.name === 'AbortError' ||
+        error?.message?.includes('interrupted') ||
+        error?.message?.includes('load request');
+
+      if (isAbort) {
+        return;
+      }
+
+      if (error?.name === 'NotAllowedError') {
+        setIsMuted(true);
+        el.play()
+          .then(() => setIsPlaying(true))
+          .catch((err2: any) => {
+            const isAbort2 =
+              err2?.name === 'AbortError' ||
+              err2?.message?.includes('interrupted') ||
+              err2?.message?.includes('load request');
+            if (!isAbort2) {
+              setNeedsInteraction(true);
+            }
+          });
+      } else {
+        setIsPlaying(false);
+      }
+    }
+  }, []);
+
   const initPlayer = useCallback(() => {
     if (!channel?.url || !videoRef.current) return;
     setError(false); 
@@ -190,6 +226,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         hlsRef.current.destroy();
         hlsRef.current = null;
     }
+
+    try {
+      videoRef.current.pause();
+    } catch (e) {}
 
     const url = channel.url;
     
@@ -224,22 +264,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 loadTimeoutRef.current = null;
             }
             setLoading(false);
-            const playPromise = videoRef.current?.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    if (error.name === 'NotAllowedError') {
-                        // 尝试静音播放
-                        setIsMuted(true);
-                        videoRef.current?.play().catch(() => {
-                            setNeedsInteraction(true);
-                        });
-                    } else if (error.name !== 'AbortError') {
-                        console.error('Playback error:', error);
-                        setIsPlaying(false);
-                    }
-                });
+            if (videoRef.current) {
+              safePlay(videoRef.current);
             }
-            setIsPlaying(true);
         });
         hls.on(Hls.Events.ERROR, (_, data) => {
             if (data.fatal) {
@@ -267,15 +294,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 loadTimeoutRef.current = null;
             }
             setLoading(false); 
-            videoRef.current?.play().catch((error) => {
-                if (error.name === 'NotAllowedError') {
-                    setIsMuted(true);
-                    videoRef.current?.play().catch(() => {
-                        setNeedsInteraction(true);
-                    });
-                }
-            });
-            setIsPlaying(true); 
+            if (videoRef.current) {
+              safePlay(videoRef.current);
+            }
         };
         videoRef.current.onerror = () => { 
             isLoadedRef.current = true;
@@ -297,20 +318,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 loadTimeoutRef.current = null;
             }
             setLoading(false); 
-            const playPromise = videoRef.current?.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    if (error.name === 'NotAllowedError') {
-                        setIsMuted(true);
-                        videoRef.current?.play().catch(() => {
-                            setNeedsInteraction(true);
-                        });
-                    } else if (error.name !== 'AbortError') {
-                        setIsPlaying(false);
-                    }
-                });
+            if (videoRef.current) {
+              safePlay(videoRef.current);
             }
-            setIsPlaying(true); 
         };
         videoRef.current.onerror = (e: any) => { 
             const error = videoRef.current?.error;
@@ -330,7 +340,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             onPlaybackError?.();
         };
     }
-  }, [channel]);
+  }, [channel, safePlay]);
 
   useEffect(() => { 
     initPlayer(); 
@@ -396,10 +406,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {needsInteraction && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-30 cursor-pointer" onClick={() => {
-                videoRef.current?.play().then(() => {
-                    setNeedsInteraction(false);
-                    setIsPlaying(true);
-                }).catch(console.error);
+                setNeedsInteraction(false);
+                if (videoRef.current) safePlay(videoRef.current);
             }}>
                 <div className={`w-20 h-20 rounded-full flex items-center justify-center bg-white/10 border border-white/20 hover:bg-white/20 transition-all scale-110 shadow-2xl`}>
                     <Play className="w-8 h-8 text-white fill-current ml-1" />
@@ -469,7 +477,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <div className="flex items-center justify-between">
                     {/* 控制栏左侧：基础操作 */}
                     <div className="flex items-center gap-2 md:gap-10">
-                        <button onClick={() => { isPlaying ? videoRef.current?.pause() : videoRef.current?.play(); setIsPlaying(!isPlaying); }} className="w-10 h-10 md:w-16 md:h-16 bg-white text-black rounded-2xl md:rounded-3xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl shrink-0">
+                        <button onClick={() => { 
+                            if (isPlaying) {
+                                videoRef.current?.pause();
+                                setIsPlaying(false);
+                            } else if (videoRef.current) {
+                                safePlay(videoRef.current);
+                            }
+                        }} className="w-10 h-10 md:w-16 md:h-16 bg-white text-black rounded-2xl md:rounded-3xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl shrink-0">
                             {isPlaying ? <Square className="w-4 h-4 md:w-6 md:h-6 fill-current" /> : <Play className="w-4 h-4 md:w-6 md:h-6 fill-current ml-1" />}
                         </button>
 

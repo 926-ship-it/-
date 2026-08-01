@@ -45,6 +45,18 @@ export const SimulatedMonitorOverlay: React.FC<SimulatedMonitorOverlayProps> = (
     const url = channel.url;
     const isHls = url.toLowerCase().includes('m3u8');
 
+    const playVideo = (el: HTMLVideoElement) => {
+      const p = el.play();
+      if (p !== undefined) {
+        p.then(() => setIsPlaying(true)).catch((err) => {
+          if (err?.name === 'NotAllowedError') {
+            setIsMuted(true);
+            el.play().then(() => setIsPlaying(true)).catch(() => {});
+          }
+        });
+      }
+    };
+
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
@@ -55,10 +67,7 @@ export const SimulatedMonitorOverlay: React.FC<SimulatedMonitorOverlayProps> = (
       hls.attachMedia(videoRef.current);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsLoading(false);
-        videoRef.current?.play().then(() => setIsPlaying(true)).catch(() => {
-          setIsMuted(true);
-          videoRef.current?.play().then(() => setIsPlaying(true)).catch(console.error);
-        });
+        if (videoRef.current) playVideo(videoRef.current);
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
@@ -70,7 +79,7 @@ export const SimulatedMonitorOverlay: React.FC<SimulatedMonitorOverlayProps> = (
       videoRef.current.src = url;
       videoRef.current.oncanplay = () => {
         setIsLoading(false);
-        videoRef.current?.play().then(() => setIsPlaying(true)).catch(console.error);
+        if (videoRef.current) playVideo(videoRef.current);
       };
       videoRef.current.onerror = () => {
         setIsLoading(false);
