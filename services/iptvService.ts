@@ -155,7 +155,7 @@ export const fetchCustomPlaylist = async (playlistUrl: string, refresh = false):
   }
 };
 
-export const verifyChannelStream = async (url: string, timeout = 3500): Promise<boolean> => {
+export const verifyChannelStream = async (url: string, timeout = 3000): Promise<boolean> => {
     if (!url) return false;
     // HTTP urls will fail as Mixed Content on HTTPS origins
     if (url.startsWith('http://')) return false;
@@ -164,44 +164,46 @@ export const verifyChannelStream = async (url: string, timeout = 3500): Promise<
     const id = setTimeout(() => controller.abort(), timeout);
     try {
         const response = await fetch(url, { 
-            method: 'HEAD',
+            method: 'GET',
             signal: controller.signal 
         });
         clearTimeout(id);
-        if (response.ok || (response.status >= 200 && response.status < 400)) return true;
-    } catch (e) {
+        
+        // Explicit HTTP error statuses (404, 500, 403, 502, etc.) mean channel is dead
+        if (response.status >= 400) {
+            return false;
+        }
+
+        if (response.ok || (response.status >= 200 && response.status < 400)) {
+            return true;
+        }
+    } catch (e: any) {
         clearTimeout(id);
+        
+        // Timeout means server is unreachable or offline
+        if (e?.name === 'AbortError') {
+            return false;
+        }
+
+        // Fallback for CORS-restricted streams (TypeError: Failed to fetch)
+        // Checks if server responds via no-cors mode within 2000ms
+        const controllerNoCors = new AbortController();
+        const idNoCors = setTimeout(() => controllerNoCors.abort(), 2000);
+        try {
+            const resNoCors = await fetch(url, {
+                method: 'GET',
+                mode: 'no-cors',
+                signal: controllerNoCors.signal
+            });
+            clearTimeout(idNoCors);
+            return resNoCors.type === 'opaque' || resNoCors.ok;
+        } catch (errNoCors) {
+            clearTimeout(idNoCors);
+            return false;
+        }
     }
 
-    const controller2 = new AbortController();
-    const id2 = setTimeout(() => controller2.abort(), timeout);
-    try {
-        const response2 = await fetch(url, {
-            method: 'GET',
-            headers: { Range: 'bytes=0-100' },
-            signal: controller2.signal
-        });
-        clearTimeout(id2);
-        if (response2.ok || (response2.status >= 200 && response2.status < 400)) return true;
-    } catch (err) {
-        clearTimeout(id2);
-    }
-
-    // Fallback mode: 'no-cors' to verify reachability for live streams lacking CORS headers
-    const controller3 = new AbortController();
-    const id3 = setTimeout(() => controller3.abort(), timeout);
-    try {
-        const response3 = await fetch(url, {
-            method: 'GET',
-            mode: 'no-cors',
-            signal: controller3.signal
-        });
-        clearTimeout(id3);
-        return response3.type === 'opaque' || response3.ok;
-    } catch (err) {
-        clearTimeout(id3);
-        return false;
-    }
+    return false;
 };
 
 export const filterPlayableChannels = async (
@@ -219,12 +221,12 @@ export const filterPlayableChannels = async (
     const total = channels.length;
     let tested = channels.length - secureChannels.length;
 
-    const BATCH_SIZE = 8;
+    const BATCH_SIZE = 15;
     for (let i = 0; i < secureChannels.length; i += BATCH_SIZE) {
         const batch = secureChannels.slice(i, i + BATCH_SIZE);
         const results = await Promise.all(
             batch.map(async (ch) => {
-                const isPlayable = await verifyChannelStream(ch.url, 3000);
+                const isPlayable = await verifyChannelStream(ch.url, 2500);
                 return isPlayable ? ch : null;
             })
         );
