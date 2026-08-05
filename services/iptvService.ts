@@ -251,61 +251,34 @@ export const fetchCustomPlaylist = async (playlistUrl: string, refresh = false):
 };
 
 export const verifyChannelStreamWithLatency = async (url: string, timeout = 3000): Promise<{ playable: boolean; latency?: number }> => {
-    if (!url) return { playable: false };
+    if (!url || typeof url !== 'string') return { playable: false };
     // HTTP urls will fail as Mixed Content on HTTPS origins
     if (url.startsWith('http://')) return { playable: false };
 
     const startTime = performance.now();
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(new Error('Verification timeout')), timeout);
+
     try {
+        // Attempt no-cors fetch directly to bypass CORS preflight and prevent browser console "Failed to fetch" errors
         const response = await fetch(url, { 
             method: 'GET',
+            mode: 'no-cors',
             signal: controller.signal 
-        });
+        }).catch(() => null);
+
         clearTimeout(id);
         const elapsed = Math.round(performance.now() - startTime);
-        
-        // Explicit HTTP error statuses (404, 500, 403, 502, etc.) mean channel is dead
-        if (response.status >= 400) {
-            return { playable: false };
-        }
 
-        if (response.ok || (response.status >= 200 && response.status < 400)) {
+        if (response && (response.type === 'opaque' || response.ok || (response.status >= 200 && response.status < 400))) {
             return { playable: true, latency: elapsed };
         }
+
+        return { playable: false };
     } catch (e: any) {
         clearTimeout(id);
-        
-        // Timeout or signal abort: handle all abort variations safely
-        const isAbort = e?.name === 'AbortError' || e?.name === 'DOMException' || String(e?.message || e).toLowerCase().includes('abort');
-        if (isAbort) {
-            return { playable: false };
-        }
-
-        // Fallback for CORS-restricted streams (TypeError: Failed to fetch)
-        // Checks if server responds via no-cors mode within 2000ms
-        const startNoCors = performance.now();
-        const controllerNoCors = new AbortController();
-        const idNoCors = setTimeout(() => controllerNoCors.abort(new Error('No-cors timeout')), 2000);
-        try {
-            const resNoCors = await fetch(url, {
-                method: 'GET',
-                mode: 'no-cors',
-                signal: controllerNoCors.signal
-            });
-            clearTimeout(idNoCors);
-            const elapsed = Math.round(performance.now() - startNoCors);
-            if (resNoCors.type === 'opaque' || resNoCors.ok) {
-                return { playable: true, latency: elapsed };
-            }
-        } catch (errNoCors) {
-            clearTimeout(idNoCors);
-            return { playable: false };
-        }
+        return { playable: false };
     }
-
-    return { playable: false };
 };
 
 export const verifyChannelStream = async (url: string, timeout = 3000): Promise<boolean> => {

@@ -303,14 +303,30 @@ const App: React.FC = () => {
         strReason.includes('Failed to fetch') ||
         strReason.includes('signal is aborted') ||
         strReason.includes('AbortError') ||
-        strReason.includes('NetworkError')
+        strReason.includes('NetworkError') ||
+        strReason.includes('Load failed')
+      ) {
+        event.preventDefault();
+      }
+    };
+
+    const handleError = (event: ErrorEvent) => {
+      const msg = String(event.message || '');
+      if (
+        msg.includes('Failed to fetch') ||
+        msg.includes('Script error') ||
+        msg.includes('Load failed')
       ) {
         event.preventDefault();
       }
     };
 
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
-    return () => window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    window.addEventListener('error', handleError);
+    return () => {
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      window.removeEventListener('error', handleError);
+    };
   }, []);
 
   useEffect(() => {
