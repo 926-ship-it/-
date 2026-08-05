@@ -339,11 +339,30 @@ const App: React.FC = () => {
         } else {
             data = mode === 'tv' ? await fetchChannelsByCountry(selectedCountry.code) : await fetchRadioStations(selectedCountry.code);
         }
+
+        // 严禁纯 HTTP 跨域死链流（浏览器 HTTPS 页面会自动拦截 HTTP 产生 Failed to fetch 错误）
+        data = data.filter(c => c.url && c.url.startsWith('https://'));
         setChannels(data);
-        if (data.length > 0 && !currentChannel) handleSelectChannel(data[0]);
+
+        if (data.length > 0) {
+            // 探活轻量测试：快速校验前 5 个候选频道，选出首个 100% 可播放的信道，彻底消除黑屏卡顿
+            const candidates = data.slice(0, 5);
+            let firstPlayable: Channel | null = null;
+
+            for (const cand of candidates) {
+                const check = await verifyChannelStreamWithLatency(cand.url, 2000);
+                if (check.playable) {
+                    firstPlayable = { ...cand, latency: check.latency };
+                    break;
+                }
+            }
+
+            const target = firstPlayable || data[0];
+            handleSelectChannel(target);
+        }
     } catch (e) { setChannels([]); }
     setLoading(false);
-  }, [selectedCountry, mode, discoveryTag]);
+  }, [selectedCountry, mode, discoveryTag, handleSelectChannel]);
 
   useEffect(() => { if (isReady) loadChannels(); }, [loadChannels, isReady]);
 
