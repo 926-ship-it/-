@@ -52,6 +52,70 @@ const LogoImage = ({ src, name, isActive, mode }: { src: string | null, name: st
   );
 };
 
+const SignalIndicator: React.FC<{ latency?: number; isActive: boolean; lang?: Language }> = ({ latency, isActive, lang = 'zh' }) => {
+  let bars = 0; // 0: no latency test, 1: slow, 2: medium, 3: fast
+  let color = 'bg-gray-400/30';
+  let latencyText = '';
+  let statusText = lang === 'zh' ? '未测' : 'Untested';
+
+  if (typeof latency === 'number' && latency > 0) {
+    latencyText = `${latency}ms`;
+    if (latency < 450) {
+      bars = 3;
+      color = isActive ? 'bg-black' : 'bg-emerald-400';
+      statusText = lang === 'zh' ? '极佳' : 'Fast';
+    } else if (latency < 1200) {
+      bars = 2;
+      color = isActive ? 'bg-black/80' : 'bg-cyan-400';
+      statusText = lang === 'zh' ? '良好' : 'Good';
+    } else {
+      bars = 1;
+      color = isActive ? 'bg-black/60' : 'bg-amber-400';
+      statusText = lang === 'zh' ? '一般' : 'Fair';
+    }
+  }
+
+  return (
+    <div 
+      className="absolute top-1.5 left-1.5 flex items-center gap-1 z-10 group/sig"
+      title={typeof latency === 'number' ? `${statusText} (${latencyText})` : (lang === 'zh' ? '网络状态：未检测' : 'Network: Untested')}
+    >
+      <div className={`flex items-end gap-[1.5px] h-3 px-1 py-0.5 rounded backdrop-blur-sm transition-all ${
+        isActive ? 'bg-black/10' : 'bg-black/30 border border-white/5'
+      }`}>
+        <span 
+          className={`w-[2px] rounded-full transition-all ${
+            bars >= 1 ? (isActive ? 'bg-black' : color) : (isActive ? 'bg-black/20' : 'bg-white/20')
+          }`} 
+          style={{ height: '4px' }}
+        />
+        <span 
+          className={`w-[2px] rounded-full transition-all ${
+            bars >= 2 ? (isActive ? 'bg-black' : color) : (isActive ? 'bg-black/20' : 'bg-white/20')
+          }`} 
+          style={{ height: '7px' }}
+        />
+        <span 
+          className={`w-[2px] rounded-full transition-all ${
+            bars >= 3 ? (isActive ? 'bg-black' : color) : (isActive ? 'bg-black/20' : 'bg-white/20')
+          }`} 
+          style={{ height: '10px' }}
+        />
+      </div>
+
+      {latencyText ? (
+        <span className={`text-[7px] md:text-[8px] font-mono font-bold px-1 py-0.2 rounded transition-opacity ${
+          isActive 
+            ? 'bg-black/15 text-black font-extrabold' 
+            : 'bg-black/60 text-white/90 opacity-0 group-hover/sig:opacity-100'
+        }`}>
+          {latencyText}
+        </span>
+      ) : null}
+    </div>
+  );
+};
+
 export const ChannelGrid: React.FC<ChannelGridProps> = ({ 
     channels, currentChannel, onSelectChannel, loading, mode, theme, favorites, onToggleFavorite,
     externalFilter = '', onExternalFilterChange,
@@ -163,10 +227,11 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2.5 md:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2.5 md:gap-3.5">
           {filteredChannels.length > 0 ? filteredChannels.map(channel => {
               const isActive = currentChannel?.id === channel.id;
               const isFav = favorites.some(f => f.id === channel.id);
+              const isExpired = channel.expired;
               
               return (
                   <div
@@ -175,12 +240,21 @@ export const ChannelGrid: React.FC<ChannelGridProps> = ({
                       className={`
                         group relative p-2.5 md:p-4 flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer
                         border ${styles.layoutShape} active:scale-95 touch-manipulation
+                        ${isExpired ? 'opacity-40 grayscale hover:opacity-70 border-rose-500/20' : ''}
                         ${isActive 
                             ? `${styles.buttonActive} shadow-xl scale-[1.02] z-10 border-transparent` 
                             : `${styles.card} hover:bg-white/5 md:hover:-translate-y-1`}
                       `}
                   >
-                      {isFav && !isActive && (
+                      <SignalIndicator latency={channel.latency} isActive={isActive} lang={lang} />
+
+                      {isExpired && (
+                        <div className="absolute top-1.5 right-1.5 bg-rose-500/80 text-white text-[7px] md:text-[8px] font-mono px-1 rounded">
+                          {lang === 'zh' ? '已失效' : 'Expired'}
+                        </div>
+                      )}
+
+                      {isFav && !isActive && !isExpired && (
                           <div className="absolute top-1.5 right-1.5 text-amber-500 opacity-60">
                               <Star className="w-2.5 h-2.5 md:w-3.5 md:h-3.5 fill-current" />
                           </div>

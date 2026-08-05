@@ -15,6 +15,9 @@ export interface Channel {
   url: string;
   group?: string;
   type?: 'tv' | 'radio';
+  latency?: number;
+  expired?: boolean;
+  failCount?: number;
 }
 
 export interface ThemeStyles {

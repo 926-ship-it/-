@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { VideoPlayer } from './components/VideoPlayer';
 import { ChannelGrid } from './components/ChannelGrid';
@@ -7,9 +7,9 @@ import { FavoritesBar } from './components/FavoritesBar';
 import { AiChatPet } from './components/AiChatPet';
 import { SettingsModal } from './components/SettingsModal';
 import { ImportModal } from './components/ImportModal';
-import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, fetchGlobalChannelsByCategory, getTimezone, GLOBAL_COUNTRY, searchChannels, filterPlayableChannels } from './services/iptvService';
+import { fetchCountries, fetchChannelsByCountry, fetchRadioStations, fetchGlobalChannelsByCategory, getTimezone, GLOBAL_COUNTRY, searchChannels, filterPlayableChannels, verifyChannelStreamWithLatency } from './services/iptvService';
 import { Country, Channel, AppTheme, Language } from './types';
-import { Menu, RefreshCw, Shuffle, Globe, Loader2, Sparkles, Clock, Zap, X, Search } from 'lucide-react';
+import { Menu, RefreshCw, Shuffle, Globe, Loader2, Sparkles, Clock, Zap, X, Search, AlertTriangle, Flag, Wrench, CheckCircle2 } from 'lucide-react';
 
 const THEMES: AppTheme[] = [
   {
@@ -99,6 +99,13 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const handleChannelLatencyUpdate = useCallback((latency: number) => {
+    if (!currentChannel) return;
+    const channelId = currentChannel.id;
+    setChannels(prev => prev.map(ch => ch.id === channelId ? { ...ch, latency } : ch));
+    setCurrentChannel(prev => prev ? { ...prev, latency } : null);
+  }, [currentChannel]);
+
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mode, setMode] = useState<'tv' | 'radio'>('tv');
@@ -113,6 +120,13 @@ const App: React.FC = () => {
   const [isCleaning, setIsCleaning] = useState(false);
   const [cleanProgress, setCleanProgress] = useState<{ tested: number; total: number; validCount: number } | null>(null);
   const [cleanSummary, setCleanSummary] = useState<string | null>(null);
+  const [deadChannelNotice, setDeadChannelNotice] = useState<{
+    failedChannel: Channel;
+    statusMessage?: string;
+    isRepairing?: boolean;
+  } | null>(null);
+
+  const channelFailCountsRef = useRef<Record<string, number>>({});
 
   const handleCleanChannels = useCallback(async (targetList?: Channel[]) => {
     const listToClean = targetList || channels;
@@ -127,26 +141,46 @@ const App: React.FC = () => {
             setCleanProgress({ tested, total, validCount });
         });
 
-        setChannels(validChannels);
+        const removedChannels = listToClean.filter(c => !validChannels.some(v => v.id === c.id));
+
+        // 尝试全网检索备用最新稳定信号补全列表
+        let repairedSignals: Channel[] = [];
+        if (removedChannels.length > 0) {
+            for (const deadChan of removedChannels.slice(0, 5)) {
+                try {
+                    const searchRes = await searchChannels(deadChan.name);
+                    const replacement = searchRes.find(r => r.url !== deadChan.url);
+                    if (replacement) {
+                        const checkRepl = await verifyChannelStreamWithLatency(replacement.url, 2000);
+                        if (checkRepl.playable) {
+                            repairedSignals.push({ ...replacement, latency: checkRepl.latency });
+                        }
+                    }
+                } catch (e) {}
+            }
+        }
+
+        const finalChannels = [...repairedSignals, ...validChannels];
+        setChannels(finalChannels);
         setIsCleaning(false);
         setCleanProgress(null);
 
         if (removedCount > 0) {
             const msg = lang === 'zh'
-                ? `链路测试完成：已为您自动净化并剔除 ${removedCount} 个不可播放频段`
-                : `Cleanup complete: Auto-removed ${removedCount} unplayable channels`;
+                ? `链路测试完成：清除 ${removedCount} 个不可看频道${repairedSignals.length > 0 ? `，全网补齐 ${repairedSignals.length} 个最新稳定信号` : ''}`
+                : `Cleanup complete: Cleared ${removedCount} dead channels${repairedSignals.length > 0 ? `, recovered ${repairedSignals.length} stable streams` : ''}`;
             setCleanSummary(msg);
-            setTimeout(() => setCleanSummary(null), 6000);
+            setTimeout(() => setCleanSummary(null), 7000);
 
-            if (currentChannel && !validChannels.some(c => c.id === currentChannel.id)) {
-                if (validChannels.length > 0) {
-                    handleSelectChannel(validChannels[0]);
+            if (currentChannel && !finalChannels.some(c => c.id === currentChannel.id)) {
+                if (finalChannels.length > 0) {
+                    handleSelectChannel(finalChannels[0]);
                 }
             }
         } else {
             const msg = lang === 'zh'
-                ? `链路测试完成：当前 ${validChannels.length} 个波段信道全部可用`
-                : `Scan complete: All ${validChannels.length} channels are playable`;
+                ? `链路测试完成：当前 ${finalChannels.length} 个波段信道全部可用`
+                : `Scan complete: All ${finalChannels.length} channels are playable`;
             setCleanSummary(msg);
             setTimeout(() => setCleanSummary(null), 4000);
         }
@@ -155,6 +189,90 @@ const App: React.FC = () => {
         setCleanProgress(null);
     }
   }, [channels, currentChannel, lang, handleSelectChannel]);
+
+  // 后台15分钟静默健康自检任务与全网信号检索补全
+  useEffect(() => {
+    if (!isReady) return;
+
+    const HEALTH_CHECK_INTERVAL = 15 * 60 * 1000; // 15分钟
+
+    const runSilentHealthCheck = async () => {
+      const targetsMap = new Map<string, Channel>();
+      if (currentChannel) targetsMap.set(currentChannel.id, currentChannel);
+      favorites.forEach(f => targetsMap.set(f.id, f));
+      channels.slice(0, 10).forEach(c => targetsMap.set(c.id, c));
+
+      const targets = Array.from(targetsMap.values());
+      if (targets.length === 0) return;
+
+      const deadList: Channel[] = [];
+      const updatedCounts = { ...channelFailCountsRef.current };
+
+      for (const chan of targets) {
+        const res = await verifyChannelStreamWithLatency(chan.url, 2500);
+        if (!res.playable) {
+          const currentCount = (updatedCounts[chan.id] || 0) + 1;
+          updatedCounts[chan.id] = currentCount;
+          if (currentCount >= 3) {
+            deadList.push({ ...chan, expired: true, failCount: currentCount });
+          }
+        } else {
+          updatedCounts[chan.id] = 0;
+        }
+      }
+
+      channelFailCountsRef.current = updatedCounts;
+
+      if (deadList.length > 0) {
+        const deadIds = new Set(deadList.map(d => d.id));
+
+        // 清除不能看的频道
+        setChannels(prev => prev.filter(c => !deadIds.has(c.id)));
+        setFavorites(prev => prev.filter(f => !deadIds.has(f.id)));
+
+        // 在网上搜索最新的稳定信号
+        let repairedSignals: Channel[] = [];
+        for (const deadChan of deadList) {
+          try {
+            const searchResults = await searchChannels(deadChan.name);
+            const replacement = searchResults.find(r => r.url !== deadChan.url);
+            if (replacement) {
+              const checkRepl = await verifyChannelStreamWithLatency(replacement.url, 2000);
+              if (checkRepl.playable) {
+                repairedSignals.push({ ...replacement, latency: checkRepl.latency });
+              }
+            }
+          } catch (e) {}
+        }
+
+        if (repairedSignals.length > 0) {
+          setChannels(prev => {
+            const existingUrls = new Set(prev.map(c => c.url));
+            const freshToInsert = repairedSignals.filter(s => !existingUrls.has(s.url));
+            return [...freshToInsert, ...prev];
+          });
+        }
+
+        const msg = lang === 'zh'
+          ? `后台静默自检：已清除 ${deadList.length} 个失效频道${repairedSignals.length > 0 ? `，全网为您补齐 ${repairedSignals.length} 个最新稳定信号` : ''}`
+          : `Health check: Cleared ${deadList.length} dead channels${repairedSignals.length > 0 ? `, online recovered ${repairedSignals.length} new stable signals` : ''}`;
+
+        setCleanSummary(msg);
+        setTimeout(() => setCleanSummary(null), 8000);
+      }
+    };
+
+    const initialTimer = setTimeout(() => {
+      runSilentHealthCheck();
+    }, 25000);
+
+    const intervalTimer = setInterval(runSilentHealthCheck, HEALTH_CHECK_INTERVAL);
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(intervalTimer);
+    };
+  }, [isReady, currentChannel, favorites, channels, lang]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -176,6 +294,24 @@ const App: React.FC = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, [selectedCountry, lang]);
+
+  useEffect(() => {
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      const strReason = String(reason?.message || reason || '');
+      if (
+        strReason.includes('Failed to fetch') ||
+        strReason.includes('signal is aborted') ||
+        strReason.includes('AbortError') ||
+        strReason.includes('NetworkError')
+      ) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    return () => window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -306,16 +442,82 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRepairChannel = async (failedChan: Channel) => {
+    setDeadChannelNotice(prev => prev ? { 
+      ...prev, 
+      isRepairing: true, 
+      statusMessage: lang === 'zh' ? '正在全网检索并验证备用信道源...' : 'Searching global database for replacement source...' 
+    } : null);
+
+    try {
+      const results = await searchChannels(failedChan.name);
+      const replacement = results.find(r => r.url !== failedChan.url);
+
+      if (replacement) {
+        setDeadChannelNotice(prev => prev ? { 
+          ...prev, 
+          isRepairing: false, 
+          statusMessage: lang === 'zh' ? `已匹配到全新信道：${replacement.name}` : `Repaired: Found source ${replacement.name}` 
+        } : null);
+        
+        setTimeout(() => {
+          handleSelectChannel(replacement);
+          setDeadChannelNotice(null);
+        }, 1200);
+      } else {
+        setDeadChannelNotice(prev => prev ? { 
+          ...prev, 
+          isRepairing: false, 
+          statusMessage: lang === 'zh' ? '全网暂无备用信道源，已建议您切换其他频道' : 'No working replacement source found.' 
+        } : null);
+      }
+    } catch (e) {
+      setDeadChannelNotice(prev => prev ? { 
+        ...prev, 
+        isRepairing: false, 
+        statusMessage: lang === 'zh' ? '检索网络超时，请稍后再试' : 'Search timed out.' 
+      } : null);
+    }
+  };
+
+  const handleReportChannel = (failedChan: Channel) => {
+    setFavorites(prev => prev.filter(f => f.id !== failedChan.id));
+    setDeadChannelNotice(prev => prev ? {
+      ...prev,
+      statusMessage: lang === 'zh' ? '已记录并上报该失效信道，感谢您的反馈！' : 'Channel reported as dead. Thank you!'
+    } : null);
+
+    setTimeout(() => {
+      setDeadChannelNotice(null);
+    }, 1500);
+  };
+
   const handlePlaybackError = async () => {
     if (!currentChannel) return;
 
     const failedChannel = currentChannel;
 
-    // Remove failed channel from list immediately
+    // 直接清除不能看的频道，包括收藏和频道列表
     setChannels(prev => prev.filter(c => c.id !== failedChannel.id));
+    setFavorites(prev => prev.filter(f => f.id !== failedChannel.id));
 
-    if (autoSwitchCount >= 4) {
-      console.warn('Reached maximum auto switches (4) to prevent loop on completely dead connection.');
+    // 网上搜索最新的稳定信号
+    searchChannels(failedChannel.name).then(async (results) => {
+      const replacement = results.find(r => r.url !== failedChannel.url);
+      if (replacement) {
+        const check = await verifyChannelStreamWithLatency(replacement.url, 2000);
+        if (check.playable) {
+          setChannels(prev => {
+            if (prev.some(c => c.id === replacement.id || c.url === replacement.url)) return prev;
+            return [{ ...replacement, latency: check.latency }, ...prev];
+          });
+        }
+      }
+    }).catch(() => {});
+
+    if (autoSwitchCount >= 3) {
+      console.warn('Reached maximum auto switches limit to prevent loop on dead connection.');
+      setDeadChannelNotice({ failedChannel });
       return;
     }
 
@@ -338,6 +540,9 @@ const App: React.FC = () => {
         } else if (channels.length > 1) {
             // 循环回到第一个
             handleSelectChannel(channels[0], true);
+        } else {
+            // 没有备用频道可切换
+            setDeadChannelNotice({ failedChannel });
         }
     }
   };
@@ -368,7 +573,7 @@ const App: React.FC = () => {
       <main className="flex-1 flex flex-col h-full min-w-0 z-10 relative">
         <header className={`px-4 md:px-8 py-2 md:py-4 flex items-center justify-between gap-4 border-b ${theme.styles.border} ${theme.styles.bgSidebar} transition-all shrink-0`}>
             <div className="flex items-center gap-3 min-w-0">
-                <button onClick={() => setSidebarOpen(true)} className="md:hidden p-1.5 opacity-80"><Menu className={`w-5 h-5 ${theme.styles.textMain}`} /></button>
+                <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1.5 opacity-80"><Menu className={`w-5 h-5 ${theme.styles.textMain}`} /></button>
                 <div className="flex items-center gap-2.5 min-w-0">
                     <span className="text-xl md:text-2xl leading-none shrink-0">{selectedCountry?.flag}</span>
                     <div className="flex flex-col min-w-0">
@@ -401,20 +606,35 @@ const App: React.FC = () => {
                 )}
             </form>
 
-            <div className="flex items-center gap-2 shrink-0">
-                <button onClick={handleRandomPlay} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} hover:scale-110 transition-transform`}>
-                    <Shuffle className="w-3.5 h-3.5 md:w-4 h-4" />
+            <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+                <button 
+                    onClick={handleRandomPlay} 
+                    title={lang === 'zh' ? '随机切台' : 'Random Channel'}
+                    className={`px-2.5 md:px-3.5 py-1.5 rounded-full text-[9px] md:text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shrink-0 border ${theme.styles.button} ${theme.styles.border} hover:scale-[1.02] active:scale-95`}
+                >
+                    <Shuffle className="w-3 h-3 md:w-3.5 md:h-3.5" />
+                    <span>{lang === 'zh' ? '随机切台' : 'Random'}</span>
                 </button>
-                <button onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} className={`text-[8px] md:text-[10px] font-black uppercase px-1 transition-colors ${theme.styles.textDim} hover:${theme.styles.textMain}`}>
-                    {lang === 'zh' ? 'EN' : 'CN'}
+
+                <button 
+                    onClick={() => loadChannels()} 
+                    title={lang === 'zh' ? '刷新频道列表' : 'Refresh List'}
+                    className={`px-2.5 md:px-3.5 py-1.5 rounded-full text-[9px] md:text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shrink-0 border ${theme.styles.button} ${theme.styles.border} hover:scale-[1.02] active:scale-95`}
+                >
+                    <RefreshCw className={`w-3 h-3 md:w-3.5 md:h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                    <span>{lang === 'zh' ? '刷新频道' : 'Refresh'}</span>
                 </button>
-                <button onClick={() => loadChannels()} className={`p-1.5 md:p-2 rounded-lg ${theme.styles.button} ${loading ? 'animate-spin' : ''}`}>
-                    <RefreshCw className="w-3.5 h-3.5 md:w-4 h-4" />
+
+                <button 
+                    onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')} 
+                    className={`px-2 md:px-2.5 py-1.5 rounded-full text-[9px] md:text-[10px] font-black uppercase transition-all shrink-0 border ${theme.styles.button} ${theme.styles.border} hover:scale-[1.02] active:scale-95 ${theme.styles.textDim}`}
+                >
+                    {lang === 'zh' ? 'EN' : '中文'}
                 </button>
             </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-3 md:p-10 scrollbar-thin">
+        <div className="flex-1 overflow-y-auto p-3 md:p-6 lg:p-10 scrollbar-thin">
             <div className="max-w-7xl mx-auto space-y-4 md:space-y-8">
                 <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar snap-x">
                     <div className="flex items-center gap-2 shrink-0 pr-2 border-r border-black/5 mr-1">
@@ -434,10 +654,10 @@ const App: React.FC = () => {
                     )}
                 </div>
 
-                {/* Split Layout: Left is Sticky Video + Favorites, Right is Channels + AI Chat */}
-                <div className="flex flex-col lg:flex-row gap-6 md:gap-8 items-start">
-                    {/* Left Sticky Column */}
-                    <div className="w-full lg:w-[55%] xl:w-[58%] lg:sticky lg:top-6 xl:top-10 space-y-4 shrink-0">
+                {/* Split Layout: Desktop uses side-by-side (lg+), Mobile & Tablet share unified stacked layout (<lg) */}
+                <div className="flex flex-col lg:flex-row gap-4 md:gap-6 lg:gap-8 items-start">
+                    {/* Player & Favorites Column */}
+                    <div className="w-full lg:w-[55%] xl:w-[58%] lg:sticky lg:top-6 space-y-3 md:space-y-4 shrink-0">
                         <VideoPlayer 
                             key={currentChannel?.id || 'no-channel'}
                             channel={currentChannel} country={selectedCountry} theme={theme}
@@ -447,12 +667,13 @@ const App: React.FC = () => {
                             onRandom={handleRandomPlay}
                             onTryBackup={handleTryBackup}
                             onPlaybackError={handlePlaybackError}
+                            onUpdateLatency={handleChannelLatencyUpdate}
                         />
                         <FavoritesBar favorites={favorites} currentChannel={currentChannel} onSelectChannel={handleSelectChannel} theme={theme} mode={mode} />
                     </div>
 
-                    {/* Right Scrollable Column */}
-                    <div className="flex-1 w-full space-y-6">
+                    {/* Right Scrollable Column (Channels & Chat) */}
+                    <div className="w-full lg:w-[42%] space-y-4 md:space-y-6">
                         <section className="space-y-4">
                             <div className="flex items-center justify-between border-b border-black/5 pb-2">
                                 <div className="flex items-center gap-2.5">
@@ -481,6 +702,66 @@ const App: React.FC = () => {
 
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} settings={{enableSound: true}} onToggleSound={()=>{}} lang={lang} onToggleLang={()=>{}} theme={theme} onClearHistory={()=>{}} onClearFavorites={()=>{}} />
       <ImportModal isOpen={showImport} onClose={() => setShowImport(false)} onImport={(content) => {}} theme={theme} lang={lang} />
+
+      {deadChannelNotice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-fadeIn">
+          <div className={`relative w-full max-w-md p-5 md:p-6 rounded-3xl border shadow-2xl ${theme.styles.bgSidebar} ${theme.styles.border} ${theme.styles.textMain} space-y-4`}>
+            <button 
+              onClick={() => setDeadChannelNotice(null)}
+              className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-white/10 transition-all opacity-70 hover:opacity-100"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-400 shrink-0">
+                <AlertTriangle className="w-6 h-6 animate-pulse" />
+              </div>
+              <div className="space-y-1 pr-6">
+                <h3 className="text-sm md:text-base font-black tracking-tight leading-tight">
+                  {lang === 'zh' ? '信道连续连接异常' : 'Continuous Playback Failures'}
+                </h3>
+                <p className={`text-xs ${theme.styles.textDim} leading-relaxed`}>
+                  {lang === 'zh' 
+                    ? `频道「${deadChannelNotice.failedChannel.name}」及自动备用频段多次连接失败，已暂停自动切台。` 
+                    : `Channel "${deadChannelNotice.failedChannel.name}" failed to connect multiple times. Auto-switch paused.`}
+                </p>
+              </div>
+            </div>
+
+            {deadChannelNotice.statusMessage ? (
+              <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-xs font-mono animate-fadeIn">
+                {deadChannelNotice.isRepairing ? (
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0 text-cyan-400" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                )}
+                <span>{deadChannelNotice.statusMessage}</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                <button
+                  onClick={() => handleRepairChannel(deadChannelNotice.failedChannel)}
+                  disabled={deadChannelNotice.isRepairing}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs bg-cyan-500 text-black hover:bg-cyan-400 transition-all shadow-lg hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                >
+                  <Wrench className="w-4 h-4" />
+                  <span>{lang === 'zh' ? '全局搜索尝试修复' : 'Search & Repair'}</span>
+                </button>
+
+                <button
+                  onClick={() => handleReportChannel(deadChannelNotice.failedChannel)}
+                  disabled={deadChannelNotice.isRepairing}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-xs border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                >
+                  <Flag className="w-4 h-4" />
+                  <span>{lang === 'zh' ? '报告频道失效' : 'Report Broken'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -80,12 +80,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <>
-        {isOpen && <div className="fixed inset-0 bg-black/80 z-40 md:hidden backdrop-blur-xl" onClick={onClose} />}
+        {isOpen && <div className="fixed inset-0 bg-black/80 z-40 lg:hidden backdrop-blur-xl" onClick={onClose} />}
 
         <aside className={`
-            fixed md:relative z-50 h-full ${styles.bgSidebar} w-72 flex flex-col min-w-0
+            fixed lg:relative z-50 h-full ${styles.bgSidebar} w-72 flex flex-col min-w-0
             transition-all duration-700 cubic-bezier(0.16, 1, 0.3, 1)
-            ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+            ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
             shadow-2xl
         `}>
         

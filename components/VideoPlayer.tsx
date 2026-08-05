@@ -21,10 +21,11 @@ interface VideoPlayerProps {
   onRandom?: () => void;
   onTryBackup?: (channel: Channel) => void;
   onPlaybackError?: () => void;
+  onUpdateLatency?: (latency: number) => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
-    channel, country, theme, isFavorite, onToggleFavorite, lang, onRandom, onTryBackup, onPlaybackError
+    channel, country, theme, isFavorite, onToggleFavorite, lang, onRandom, onTryBackup, onPlaybackError, onUpdateLatency
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -32,6 +33,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const chunksRef = useRef<Blob[]>([]);
   const isLoadedRef = useRef(false);
   const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const loadStartTimeRef = useRef<number>(0);
 
   const [loading, setLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -43,6 +45,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [toast, setToast] = useState<string | null>(null);
   const [signal, setSignal] = useState<'excellent' | 'good' | 'fair' | 'poor'>('good');
   const [needsInteraction, setNeedsInteraction] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetControlsTimer = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 4000);
+  }, []);
 
   // Cast state
   const [isCastModalOpen, setIsCastModalOpen] = useState(false);
@@ -206,6 +218,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setError(false); 
     setLoading(true);
     isLoadedRef.current = false;
+    loadStartTimeRef.current = performance.now();
     if (loadTimeoutRef.current) {
         clearTimeout(loadTimeoutRef.current);
     }
@@ -264,6 +277,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 loadTimeoutRef.current = null;
             }
             setLoading(false);
+            if (loadStartTimeRef.current > 0) {
+              const lat = Math.round(performance.now() - loadStartTimeRef.current);
+              onUpdateLatency?.(lat);
+            }
             if (videoRef.current) {
               safePlay(videoRef.current);
             }
@@ -294,6 +311,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 loadTimeoutRef.current = null;
             }
             setLoading(false); 
+            if (loadStartTimeRef.current > 0) {
+              const lat = Math.round(performance.now() - loadStartTimeRef.current);
+              onUpdateLatency?.(lat);
+            }
             if (videoRef.current) {
               safePlay(videoRef.current);
             }
@@ -318,6 +339,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 loadTimeoutRef.current = null;
             }
             setLoading(false); 
+            if (loadStartTimeRef.current > 0) {
+              const lat = Math.round(performance.now() - loadStartTimeRef.current);
+              onUpdateLatency?.(lat);
+            }
             if (videoRef.current) {
               safePlay(videoRef.current);
             }
@@ -363,7 +388,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const { styles } = theme;
 
   return (
-    <div className="relative w-full group overflow-hidden touch-manipulation max-h-[55vh] md:max-h-[75vh]">
+    <div 
+      className="relative w-full group overflow-hidden touch-manipulation max-h-[50vh] md:max-h-[65vh] lg:max-h-[75vh]"
+      onClick={resetControlsTimer}
+      onMouseMove={resetControlsTimer}
+    >
       <div className={`relative w-full aspect-video bg-black ${styles.layoutShape} overflow-hidden border ${styles.border} shadow-2xl`}>
         <div className="absolute inset-0 pointer-events-none z-10 opacity-[0.04] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_2px,3px_100%]"></div>
         
@@ -456,73 +485,74 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             </div>
         )}
 
-        <div className="absolute inset-x-0 bottom-0 p-3 md:p-8 bg-gradient-to-t from-black via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-500 translate-y-4 group-hover:translate-y-0 z-50">
-            <div className="flex flex-col gap-3 md:gap-6">
+        <div className={`absolute inset-x-0 bottom-0 p-3 md:p-5 lg:p-8 bg-gradient-to-t from-black via-black/50 to-transparent transition-all duration-300 z-50 ${showControls ? 'opacity-100 translate-y-0' : 'opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0'}`}>
+            <div className="flex flex-col gap-2 md:gap-4 lg:gap-6">
                 <div className="flex items-center justify-between">
                     <div className="flex flex-col min-w-0">
-                        <h4 className="text-white font-black text-[12px] md:text-xl truncate uppercase italic tracking-tighter leading-none">{channel?.name}</h4>
-                        <div className="flex items-center gap-2 mt-2">
+                        <h4 className="text-white font-black text-xs md:text-base lg:text-xl truncate uppercase italic tracking-tighter leading-none">{channel?.name}</h4>
+                        <div className="flex items-center gap-2 mt-1.5 md:mt-2">
                             <span className="flex h-1.5 w-1.5 relative shrink-0">
                                 <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${signal === 'excellent' ? 'bg-emerald-400' : signal === 'poor' ? 'bg-rose-400' : 'bg-amber-400'}`}></span>
                                 <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${signal === 'excellent' ? 'bg-emerald-500' : signal === 'poor' ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
                             </span>
-                            <span className={`text-[7px] md:text-[10px] font-black uppercase tracking-widest ${signal === 'excellent' ? 'text-emerald-500' : signal === 'poor' ? 'text-rose-500' : 'text-amber-500'}`}>
+                            <span className={`text-[7px] md:text-[9px] lg:text-[10px] font-black uppercase tracking-widest ${signal === 'excellent' ? 'text-emerald-500' : signal === 'poor' ? 'text-rose-500' : 'text-amber-500'}`}>
                                 {signal === 'excellent' ? 'EXCELLENT SIGNAL' : signal === 'poor' ? 'WEAK SIGNAL' : 'STABLE SIGNAL'}
                             </span>
-                            <span className="text-[8px] md:text-[10px] text-white/40 uppercase font-black hidden md:block"> • {country?.name}</span>
+                            <span className="text-[8px] md:text-[9px] text-white/40 uppercase font-black hidden md:block"> • {country?.name}</span>
                         </div>
                     </div>
                 </div>
 
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                     {/* 控制栏左侧：基础操作 */}
-                    <div className="flex items-center gap-2 md:gap-10">
-                        <button onClick={() => { 
+                    <div className="flex items-center gap-2 md:gap-4 lg:gap-8 min-w-0">
+                        <button onClick={(e) => { 
+                            e.stopPropagation();
                             if (isPlaying) {
                                 videoRef.current?.pause();
                                 setIsPlaying(false);
                             } else if (videoRef.current) {
                                 safePlay(videoRef.current);
                             }
-                        }} className="w-10 h-10 md:w-16 md:h-16 bg-white text-black rounded-2xl md:rounded-3xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl shrink-0">
-                            {isPlaying ? <Square className="w-4 h-4 md:w-6 md:h-6 fill-current" /> : <Play className="w-4 h-4 md:w-6 md:h-6 fill-current ml-1" />}
+                        }} className="w-9 h-9 md:w-11 md:h-11 lg:w-14 lg:h-14 bg-white text-black rounded-xl md:rounded-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl shrink-0">
+                            {isPlaying ? <Square className="w-3.5 h-3.5 md:w-4 md:h-4 lg:w-5 lg:h-5 fill-current" /> : <Play className="w-3.5 h-3.5 md:w-4 md:h-4 lg:w-5 lg:h-5 fill-current ml-0.5" />}
                         </button>
 
-                        <div className="flex items-center gap-3">
-                            <button onClick={() => setIsMuted(!isMuted)} className="text-white/60 hover:text-white transition-colors">
-                                {isMuted ? <VolumeX className="w-5 h-5 md:w-6 h-6" /> : <Volume2 className="w-5 h-5 md:w-6 h-6" />}
+                        <div className="flex items-center gap-2 md:gap-3">
+                            <button onClick={(e) => { e.stopPropagation(); setIsMuted(!isMuted); }} className="text-white/60 hover:text-white transition-colors p-1">
+                                {isMuted ? <VolumeX className="w-4 h-4 md:w-5 md:h-5" /> : <Volume2 className="w-4 h-4 md:w-5 md:h-5" />}
                             </button>
                             <input 
                                 type="range" min="0" max="1" step="0.05" value={volume} 
-                                onChange={(e) => { setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
-                                className="w-16 md:w-32 h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-cyan-400 hidden sm:block"
+                                onChange={(e) => { e.stopPropagation(); setVolume(parseFloat(e.target.value)); setIsMuted(false); }}
+                                className="w-14 sm:w-20 md:w-24 lg:w-32 h-1 bg-white/20 rounded-full appearance-none cursor-pointer accent-cyan-400 hidden sm:block"
                             />
                         </div>
                     </div>
 
                     {/* 控制栏右侧：功能集合 */}
-                    <div className="flex items-center gap-1 md:gap-2 bg-black/20 p-1 rounded-2xl md:rounded-3xl backdrop-blur-md">
-                        <button onClick={onToggleFavorite} title="收藏" className={`p-2 md:p-3 rounded-lg md:rounded-xl transition-all ${isFavorite ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
-                            <Star className={`w-3.5 h-3.5 md:w-4.5 h-4.5 ${isFavorite ? 'fill-current' : ''}`} />
+                    <div className="flex items-center gap-1 md:gap-1.5 bg-black/30 p-1 rounded-xl md:rounded-2xl backdrop-blur-md shrink-0">
+                        <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} title="收藏" className={`p-1.5 md:p-2 rounded-lg transition-all ${isFavorite ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                            <Star className={`w-3.5 h-3.5 md:w-4 md:h-4 ${isFavorite ? 'fill-current' : ''}`} />
                         </button>
-                        <button onClick={takeScreenshot} title="快照" className="p-2 md:p-3 bg-white/10 text-white hover:bg-white/20 rounded-lg md:rounded-xl transition-all">
-                            <Camera className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
+                        <button onClick={(e) => { e.stopPropagation(); takeScreenshot(); }} title="快照" className="p-1.5 md:p-2 bg-white/10 text-white hover:bg-white/20 rounded-lg transition-all">
+                            <Camera className="w-3.5 h-3.5 md:w-4 md:h-4" />
                         </button>
-                        <button onClick={toggleRecording} title={isRecording ? "停止" : "录制"} className={`p-2 md:p-3 ${isRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg md:rounded-xl transition-all`}>
-                            {isRecording ? <StopCircle className="w-3.5 h-3.5 md:w-4.5 h-4.5" /> : <Circle className="w-3.5 h-3.5 md:w-4.5 h-4.5" />}
+                        <button onClick={(e) => { e.stopPropagation(); toggleRecording(); }} title={isRecording ? "停止" : "录制"} className={`p-1.5 md:p-2 ${isRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg transition-all`}>
+                            {isRecording ? <StopCircle className="w-3.5 h-3.5 md:w-4 md:h-4" /> : <Circle className="w-3.5 h-3.5 md:w-4 md:h-4" />}
                         </button>
-                        <button onClick={togglePiP} title="画中画" className={`p-2 md:p-3 ${isPiP ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg md:rounded-xl transition-all`}>
-                            <ExternalLink className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
+                        <button onClick={(e) => { e.stopPropagation(); togglePiP(); }} title="画中画" className={`p-1.5 md:p-2 ${isPiP ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg transition-all`}>
+                            <ExternalLink className="w-3.5 h-3.5 md:w-4 md:h-4" />
                         </button>
                         <button 
-                            onClick={handleCastClick} 
+                            onClick={(e) => { e.stopPropagation(); handleCastClick(); }} 
                             title={lang === 'zh' ? '投屏 / 外接显示器' : 'Cast / External Display'} 
-                            className={`p-2 md:p-3 ${isCasting ? 'bg-cyan-400 text-black shadow-lg shadow-cyan-400/30 animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg md:rounded-xl transition-all`}
+                            className={`p-1.5 md:p-2 ${isCasting ? 'bg-cyan-400 text-black shadow-lg shadow-cyan-400/30 animate-pulse' : 'bg-white/10 text-white hover:bg-white/20'} rounded-lg transition-all`}
                         >
-                            <Tv className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
+                            <Tv className="w-3.5 h-3.5 md:w-4 md:h-4" />
                         </button>
-                        <button onClick={() => videoRef.current?.requestFullscreen()} title="全屏" className="p-2 md:p-3 bg-white/10 text-white hover:bg-white/20 rounded-lg md:rounded-xl transition-all">
-                            <Maximize className="w-3.5 h-3.5 md:w-4.5 h-4.5" />
+                        <button onClick={(e) => { e.stopPropagation(); videoRef.current?.requestFullscreen(); }} title="全屏" className="p-1.5 md:p-2 bg-white/10 text-white hover:bg-white/20 rounded-lg transition-all">
+                            <Maximize className="w-3.5 h-3.5 md:w-4 md:h-4" />
                         </button>
                     </div>
                 </div>
